@@ -47,7 +47,7 @@ public class ReportWriter {
             for (Map.Entry<String, List<String>> entry : byReason.entrySet()) {
                 List<String> urls = entry.getValue();
                 System.out.println("  " + entry.getKey() + " (" + urls.size() + "):");
-                int shown = Math.min(urls.size(), 3);
+                int shown = Math.min(urls.size(), 10);
                 for (int i = 0; i < shown; i++) {
                     System.out.println("    " + urls.get(i));
                 }
