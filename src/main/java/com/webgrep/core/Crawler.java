@@ -12,12 +12,17 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 public class Crawler {
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
+    private static final int MAX_RETRIES = 3;
+
     private int spinnerIdx = 0;
+    private final Map<String, String> cookieJar = new HashMap<>();
 
     private final CliOptions options;
     private final ContentExtractor extractor;
@@ -59,15 +64,8 @@ public class Crawler {
             try {
                 Thread.sleep(options.getDelayMs());
 
-                org.jsoup.Connection.Response response = Jsoup.connect(current.url)
-                        .timeout(options.getTimeoutMs())
-                        .maxBodySize((int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE))
-                        .followRedirects(true)
-                        .ignoreContentType(true)
-                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                        .header("Accept-Language", "en-US,en;q=0.9,bs;q=0.8,sr;q=0.7,hr;q=0.6")
-                        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-                        .execute();
+                org.jsoup.Connection.Response response = fetchWithRetry(current.url);
+                cookieJar.putAll(response.cookies());
 
                 crawlResult.visitedCount++;
 
@@ -157,6 +155,40 @@ public class Crawler {
 
         System.err.print("\r" + " ".repeat(120) + "\r");
         return crawlResult;
+    }
+
+    /**
+     * Fetches a URL, retrying up to MAX_RETRIES times on HTTP 429 (rate limited).
+     * Waits 2s before the first retry, 4s before the second.
+     * Respects the Retry-After header when present.
+     * All requests share the session cookie jar.
+     */
+    private org.jsoup.Connection.Response fetchWithRetry(String url) throws Exception {
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                return Jsoup.connect(url)
+                        .timeout(options.getTimeoutMs())
+                        .maxBodySize((int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE))
+                        .followRedirects(true)
+                        .ignoreContentType(true)
+                        .cookies(cookieJar)
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                        .header("Accept-Language", "en-US,en;q=0.9,bs;q=0.8,sr;q=0.7,hr;q=0.6")
+                        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                        .execute();
+            } catch (org.jsoup.HttpStatusException e) {
+                if (e.getStatusCode() == 429 && attempt < MAX_RETRIES) {
+                    long waitMs = 1000L << attempt; // 2s, 4s
+                    System.err.printf("\r%-120s",
+                            "  ⏸  Rate limited — waiting " + (waitMs / 1000) + "s before retry "
+                            + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + url);
+                    Thread.sleep(waitMs);
+                } else {
+                    throw e;
+                }
+            }
+        }
+        throw new IllegalStateException("unreachable");
     }
 
     private void setupSsl() {
