@@ -30,6 +30,7 @@ public class Crawler {
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
     private final String startDomain;
+    private final boolean allowSubdomains;
     private final int maxBodySize;
     private final UrlDeduplicator dedup;
 
@@ -38,7 +39,9 @@ public class Crawler {
         this.extractor = extractor;
         this.matchEngine = matchEngine;
         String startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
-        this.startDomain = startHost.startsWith("www.") ? startHost.substring(4) : startHost;
+        boolean seedHasWww = startHost.startsWith("www.");
+        this.startDomain = seedHasWww ? startHost.substring(4) : startHost;
+        this.allowSubdomains = seedHasWww;
         this.maxBodySize = (int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE);
         this.dedup = new UrlDeduplicator(options.isAllUrls());
 
@@ -57,7 +60,13 @@ public class Crawler {
 
     private boolean isSameDomain(String linkHost) {
         String h = linkHost.toLowerCase();
-        return h.equals(startDomain) || h.endsWith("." + startDomain);
+        if (allowSubdomains) {
+            // Seed had www. (e.g. www.wikipedia.org) — allow all subdomains of the root domain
+            // so en.wikipedia.org, de.wikipedia.org etc. are all followed.
+            return h.equals(startDomain) || h.endsWith("." + startDomain);
+        }
+        // Seed had no www. — only allow the exact domain and its www. alias.
+        return h.equals(startDomain) || h.equals("www." + startDomain);
     }
 
     public CrawlResult crawl() {
