@@ -136,10 +136,24 @@ public class MainTest {
         options.validate();
         assertTrue(options.isDfs());
 
-        // off by default
-        String[] args2 = {"-u", "http://example.com", "-k", "test"};
+        // short flag
+        String[] args2 = {"-u", "http://example.com", "-k", "test", "-s"};
         CliOptions options2 = CliOptions.parse(args2);
-        assertFalse(options2.isDfs());
+        options2.validate();
+        assertTrue(options2.isDfs());
+
+        // off by default
+        String[] args3 = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options3 = CliOptions.parse(args3);
+        assertFalse(options3.isDfs());
+    }
+
+    @Test
+    public void testCrawlResultDuration() {
+        CrawlResult result = new CrawlResult();
+        assertEquals(0L, result.durationMs);
+        result.durationMs = 4250;
+        assertEquals(4250L, result.durationMs);
     }
 
     @Test(expected = IllegalArgumentException.class)

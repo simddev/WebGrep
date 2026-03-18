@@ -12,6 +12,7 @@ public class ReportWriter {
         int totalCount = results.values().stream().mapToInt(Integer::intValue).sum();
 
         System.out.println("--- WebGrep Results ---");
+        System.out.println("Duration: " + formatDuration(crawlResult.durationMs));
         System.out.println("Total matches found: " + totalCount);
         System.out.println("Pages visited: " + crawlResult.visitedCount);
         System.out.println("Pages successfully parsed: " + crawlResult.parsedCount);
@@ -47,6 +48,7 @@ public class ReportWriter {
         json.append("    \"mode\": \"").append(escapeJson(options.getMode())).append("\"\n");
         json.append("  },\n");
         json.append("  \"stats\": {\n");
+        json.append("    \"duration_ms\": ").append(crawlResult.durationMs).append(",\n");
         json.append("    \"total_matches\": ").append(crawlResult.results.values().stream().mapToInt(Integer::intValue).sum()).append(",\n");
         json.append("    \"pages_visited\": ").append(crawlResult.visitedCount).append(",\n");
         json.append("    \"pages_parsed\": ").append(crawlResult.parsedCount).append(",\n");
@@ -83,6 +85,15 @@ public class ReportWriter {
         json.append("  ]\n");
         json.append("}\n");
         System.out.println(json.toString());
+    }
+
+    private String formatDuration(long ms) {
+        if (ms < 60_000) {
+            return String.format("%.2fs", ms / 1000.0);
+        }
+        long minutes = ms / 60_000;
+        double seconds = (ms % 60_000) / 1000.0;
+        return String.format("%dm %.2fs", minutes, seconds);
     }
 
     private String escapeJson(String input) {
