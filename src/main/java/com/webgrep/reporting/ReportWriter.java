@@ -16,7 +16,13 @@ public class ReportWriter {
         System.out.println("Duration: " + formatDuration(crawlResult.durationMs));
         System.out.println("Total matches found: " + totalCount);
         System.out.println("Pages visited: " + crawlResult.visitedCount);
-        System.out.println("Pages successfully parsed: " + crawlResult.parsedCount);
+        int htmlCount = crawlResult.parsedCount - crawlResult.docsCount;
+        if (crawlResult.docsCount > 0) {
+            System.out.println("Pages successfully parsed: " + crawlResult.parsedCount
+                    + " (" + htmlCount + " HTML, " + crawlResult.docsCount + " documents)");
+        } else {
+            System.out.println("Pages successfully parsed: " + crawlResult.parsedCount);
+        }
 
         boolean hasErrors = crawlResult.errorCounts.values().stream().anyMatch(c -> c > 0);
         if (hasErrors) {
@@ -25,6 +31,11 @@ public class ReportWriter {
                 int count = crawlResult.errorCounts.get(type);
                 if (count > 0) {
                     System.out.println("  " + errorLabel(type) + ": " + count);
+                    if (type == CrawlResult.ErrorType.NETWORK_ERROR
+                            && !crawlResult.networkErrorReasons.isEmpty()) {
+                        crawlResult.networkErrorReasons.forEach((reason, n) ->
+                            System.out.println("    " + reason + ": " + n));
+                    }
                 }
             }
         }

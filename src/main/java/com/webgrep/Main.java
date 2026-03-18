@@ -50,8 +50,14 @@ public class Main {
             System.err.println("Use -h or --help for usage information.");
             System.exit(1);
         } catch (Exception e) {
-            System.err.println("Fatal Error: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("Fatal Error: " + e.getClass().getSimpleName()
+                    + (e.getMessage() != null ? " — " + e.getMessage() : ""));
+            Throwable cause = e.getCause();
+            while (cause != null) {
+                System.err.println("  Caused by: " + cause.getClass().getSimpleName()
+                        + (cause.getMessage() != null ? " — " + cause.getMessage() : ""));
+                cause = cause.getCause();
+            }
             System.exit(2);
         }
     }

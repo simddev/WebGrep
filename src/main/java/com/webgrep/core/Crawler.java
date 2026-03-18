@@ -107,6 +107,7 @@ public class Crawler {
                 } else {
                     content = extractor.extractTextFromBinary(body, current.url, contentType);
                     crawlResult.parsedCount++;
+                    crawlResult.docsCount++;
                 }
 
                 int count = matchEngine.countMatches(content, options.getKeyword(), options.getMode());
@@ -141,7 +142,7 @@ public class Crawler {
                     crawlResult.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
                 }
             } catch (Exception e) {
-                crawlResult.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
+                crawlResult.addNetworkError(e);
             }
 
             int totalMatches = crawlResult.results.values().stream().mapToInt(Integer::intValue).sum();
