@@ -17,6 +17,7 @@ public class CrawlResult {
     public final Map<ErrorType, Integer> errorCounts = new LinkedHashMap<>();
     public int visitedCount = 0;
     public int parsedCount = 0;
+    public long durationMs = 0;
 
     public CrawlResult() {
         for (ErrorType type : ErrorType.values()) {

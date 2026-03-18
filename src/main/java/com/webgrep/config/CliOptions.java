@@ -94,6 +94,7 @@ public class CliOptions {
             case 'a' -> "all-urls";
             case 'o' -> "output";
             case 'r' -> "delay-ms";
+            case 's' -> "dfs";
             case 'h' -> "help";
             default -> null;
         };
@@ -129,7 +130,7 @@ public class CliOptions {
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -a, --all-urls           Track every URL variant including query-string duplicates");
-        System.out.println("      --dfs                Use depth-first search instead of breadth-first search");
+        System.out.println("  -s, --dfs                Use depth-first search instead of breadth-first search");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");

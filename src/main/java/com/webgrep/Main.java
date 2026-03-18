@@ -34,7 +34,9 @@ public class Main {
             MatchEngine matchEngine = new MatchEngine();
             Crawler crawler = new Crawler(options, extractor, matchEngine);
 
+            long startTime = System.currentTimeMillis();
             CrawlResult result = crawler.crawl();
+            result.durationMs = System.currentTimeMillis() - startTime;
 
             ReportWriter reportWriter = new ReportWriter();
             if ("json".equals(options.getOutput())) {
