@@ -88,6 +88,7 @@ public class CliOptions {
             case 'e' -> "allow-external";
             case 'i' -> "insecure";
             case 'o' -> "output";
+            case 'r' -> "delay-ms";
             case 'h' -> "help";
             default -> null;
         };
@@ -121,7 +122,7 @@ public class CliOptions {
         System.out.println("  -p, --max-pages <n>      Maximum number of pages to crawl (default: 5000)");
         System.out.println("  -b, --max-bytes <n>      Maximum file size in bytes (default: 10MB)");
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
-        System.out.println("  --delay-ms <n>           Delay between requests in milliseconds (default: 100)");
+        System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
