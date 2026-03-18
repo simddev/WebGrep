@@ -34,6 +34,7 @@ java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
 - `-a, --all-urls`: Disable smart URL deduplication. By default, if `page?id=1` was visited, `page?id=1&sort=asc` is treated as a navigation variant and skipped. Use this flag to visit every URL regardless — useful when you want all sort/filter/pagination variants crawled.
+- `--dfs`: Use depth-first search instead of the default breadth-first search. BFS explores the site level by level (all pages at depth 1 before depth 2); DFS follows each link chain as deep as possible before backtracking. DFS can find deeply buried documents faster; BFS gives more representative coverage of the whole site.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification. Use with caution — this bypasses all TLS validation.
 - `-o, --output <format>`: Output format (`text` or `json`).
@@ -73,6 +74,11 @@ java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 **Crawl all sort/filter variants of a listing page:**
 ```bash
 java -jar WebGrep.jar -u https://example.com/listings -k topic -d 1 --all-urls
+```
+
+**Depth-first search to find deeply buried documents quickly:**
+```bash
+java -jar WebGrep.jar -u https://example.com -k "annual report" -d 3 --dfs
 ```
 
 ### Document Support

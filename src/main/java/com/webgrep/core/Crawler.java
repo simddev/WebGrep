@@ -11,9 +11,9 @@ import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Queue;
 
 public class Crawler {
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
@@ -47,14 +47,14 @@ public class Crawler {
 
     public CrawlResult crawl() {
         CrawlResult crawlResult = new CrawlResult();
-        Queue<UrlDepth> queue = new LinkedList<>();
+        Deque<UrlDepth> queue = new LinkedList<>();
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
-        queue.add(new UrlDepth(normalizedStart, 0));
+        queue.addLast(new UrlDepth(normalizedStart, 0));
         dedup.markQueued(normalizedStart);
 
         while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
-            UrlDepth current = queue.poll();
+            UrlDepth current = queue.pollFirst();
 
             try {
                 Thread.sleep(options.getDelayMs());
@@ -125,7 +125,11 @@ public class Crawler {
 
                         if (!dedup.isDuplicate(link) && dedup.size() < options.getMaxPages()) {
                             dedup.markQueued(link);
-                            queue.add(new UrlDepth(link, current.depth + 1));
+                            if (options.isDfs()) {
+                                queue.addFirst(new UrlDepth(link, current.depth + 1));
+                            } else {
+                                queue.addLast(new UrlDepth(link, current.depth + 1));
+                            }
                         }
                     }
                 }
