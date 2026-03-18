@@ -76,6 +76,8 @@ public class Crawler {
 
                 org.jsoup.Connection.Response response = fetchWithRetry(current.url);
                 cookieJar.putAll(response.cookies());
+                // Use the final URL after redirects as the canonical URL for this page
+                String effectiveUrl = response.url().toString();
 
                 crawlResult.visitedCount++;
 
@@ -104,14 +106,14 @@ public class Crawler {
                     Document doc = response.parse();
 
                     if (doc.title().contains("Just a moment...") || doc.text().contains("Enable JavaScript and cookies to continue")) {
-                        crawlResult.addBlocked(current.url, "Cloudflare/Bot protection challenge");
+                        crawlResult.addBlocked(effectiveUrl, "Cloudflare/Bot protection challenge");
                         continue;
                     }
 
                     crawlResult.parsedCount++;
                     content = extractor.extractTextFromHtml(doc);
                     if (current.depth < options.getDepth()) {
-                        links = extractor.extractLinks(doc, body, current.url);
+                        links = extractor.extractLinks(doc, body, effectiveUrl);
                     }
                 } else {
                     content = extractor.extractTextFromBinary(body, current.url, contentType);
@@ -121,7 +123,7 @@ public class Crawler {
 
                 int count = matchEngine.countMatches(content, options.getKeyword(), options.getMode());
                 if (count > 0) {
-                    crawlResult.addMatch(current.url, count);
+                    crawlResult.addMatch(effectiveUrl, count);
                 }
 
                 if (current.depth < options.getDepth()) {
@@ -187,7 +189,7 @@ public class Crawler {
                         .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
                         .execute();
             } catch (org.jsoup.HttpStatusException e) {
-                if (e.getStatusCode() == 429 && attempt < MAX_RETRIES) {
+                if (e.getStatusCode() == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
                     long waitMs = 1000L << attempt; // 2s, 4s
                     System.err.printf("\r%-120s",
                             "  ⏸  Rate limited — waiting " + (waitMs / 1000) + "s before retry "

@@ -241,4 +241,36 @@ public class UrlDeduplicatorTest {
         assertFalse(d.isDuplicate("http://court.cz/file.aspx?fileid=1234"));
         assertFalse(d.isDuplicate("http://court.cz/file.aspx?fileid=5678"));
     }
+
+    // ── http/https scheme deduplication ───────────────────────────────────────
+
+    @Test
+    public void testHttpAndHttpsVariantsAreDeduped() {
+        // Visiting http://example.com/page should block https://example.com/page (same page)
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        assertFalse(d.isDuplicate("http://example.com/page"));
+        d.markQueued("http://example.com/page");
+
+        assertTrue(d.isDuplicate("https://example.com/page"));
+        assertTrue(d.isDuplicate("http://example.com/page"));
+    }
+
+    @Test
+    public void testHttpsQueuedBlocksHttpVariant() {
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        assertFalse(d.isDuplicate("https://example.com/page"));
+        d.markQueued("https://example.com/page");
+
+        assertTrue(d.isDuplicate("http://example.com/page"));
+    }
+
+    @Test
+    public void testSchemeDeduplicationWithQueryParams() {
+        // Sort-variant dedup should also work across http/https
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        d.markQueued("https://example.com/list?sort=asc");
+
+        // Same path + superset params via http → still a dup
+        assertTrue(d.isDuplicate("http://example.com/list?sort=asc&page=2"));
+    }
 }
