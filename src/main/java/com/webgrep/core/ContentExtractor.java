@@ -95,7 +95,7 @@ public class ContentExtractor {
                 link = element.attr("href");
             }
             String normalizedLink = UrlUtils.normalizeUrl(link, baseUrl);
-            if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink)) {
+            if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink) && !links.contains(normalizedLink)) {
                 links.add(normalizedLink);
             }
         }
@@ -104,7 +104,7 @@ public class ContentExtractor {
             String bodyStr = new String(rawBody, StandardCharsets.UTF_8);
             Matcher linkMatcher = LINK_PATTERN.matcher(bodyStr);
             while (linkMatcher.find() && links.size() < MAX_LINKS_PER_PAGE) {
-                String href = linkMatcher.group(1);
+                String href = org.jsoup.parser.Parser.unescapeEntities(linkMatcher.group(1), true);
                 String normalizedLink = UrlUtils.normalizeUrl(href, baseUrl);
                 if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink)) {
                     if (!links.contains(normalizedLink)) {

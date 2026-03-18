@@ -11,10 +11,10 @@ public class MainTest {
 
     @Test
     public void testNormalizeUrl() {
-        assertEquals("http://example.com/", UrlUtils.normalizeUrl("example.com", null));
+        assertEquals("https://example.com/", UrlUtils.normalizeUrl("example.com", null));
         assertEquals("https://example.com/path", UrlUtils.normalizeUrl("//example.com/path", "https://other.com"));
-        assertEquals("http://example.com/a/b", UrlUtils.normalizeUrl("b", "http://example.com/a/"));
-        assertEquals("http://example.com/a/c", UrlUtils.normalizeUrl("/a/c", "http://example.com/a/b"));
+        assertEquals("https://example.com/a/b", UrlUtils.normalizeUrl("b", "http://example.com/a/"));
+        assertEquals("https://example.com/a/c", UrlUtils.normalizeUrl("/a/c", "http://example.com/a/b"));
     }
 
     @Test
