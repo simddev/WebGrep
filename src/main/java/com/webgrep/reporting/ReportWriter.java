@@ -10,7 +10,7 @@ public class ReportWriter {
 
     public void printTextOutput(CrawlResult crawlResult) {
         Map<String, Integer> results = crawlResult.results;
-        int totalCount = results.values().stream().mapToInt(Integer::intValue).sum();
+        int totalCount = crawlResult.getTotalMatches();
 
         System.out.println("--- WebGrep Results ---");
         System.out.println("Duration: " + formatDuration(crawlResult.durationMs));
@@ -80,7 +80,7 @@ public class ReportWriter {
         json.append("  },\n");
         json.append("  \"stats\": {\n");
         json.append("    \"duration_ms\": ").append(crawlResult.durationMs).append(",\n");
-        json.append("    \"total_matches\": ").append(crawlResult.results.values().stream().mapToInt(Integer::intValue).sum()).append(",\n");
+        json.append("    \"total_matches\": ").append(crawlResult.getTotalMatches()).append(",\n");
         json.append("    \"pages_visited\": ").append(crawlResult.visitedCount).append(",\n");
         json.append("    \"pages_parsed\": ").append(crawlResult.parsedCount).append(",\n");
         json.append("    \"docs_parsed\": ").append(crawlResult.docsCount).append(",\n");
