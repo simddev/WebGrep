@@ -130,7 +130,7 @@ public class Crawler {
                         links = extractor.extractLinks(doc, body, effectiveUrl);
                     }
                 } else {
-                    content = extractor.extractTextFromBinary(body, current.url, contentType);
+                    content = extractor.extractTextFromBinary(body, effectiveUrl, contentType);
                     crawlResult.parsedCount++;
                     crawlResult.docsCount++;
                 }
