@@ -44,7 +44,7 @@ public class Crawler {
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
         queue.add(new UrlDepth(normalizedStart, 0));
-        visited.add(normalizedStart);
+        visited.add(dedupeKey(normalizedStart));
 
         while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
             UrlDepth current = queue.poll();
@@ -116,8 +116,9 @@ public class Crawler {
                             }
                         }
 
-                        if (!visited.contains(link) && visited.size() < options.getMaxPages()) {
-                            visited.add(link);
+                        String key = dedupeKey(link);
+                        if (!visited.contains(key) && visited.size() < options.getMaxPages()) {
+                            visited.add(key);
                             queue.add(new UrlDepth(link, current.depth + 1));
                         }
                     }
@@ -151,6 +152,12 @@ public class Crawler {
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
         } catch (Exception ignored) {}
+    }
+
+    private String dedupeKey(String url) {
+        if (!options.isNoQuery()) return url;
+        int q = url.indexOf('?');
+        return q != -1 ? url.substring(0, q) : url;
     }
 
     private record UrlDepth(String url, int depth) {}
