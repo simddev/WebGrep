@@ -146,6 +146,10 @@ public class Crawler {
 
             int totalMatches = crawlResult.results.values().stream().mapToInt(Integer::intValue).sum();
             printProgress(current.url, crawlResult.visitedCount, totalMatches);
+
+            if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
+                break;
+            }
         }
 
         System.err.print("\r" + " ".repeat(100) + "\r");

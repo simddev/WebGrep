@@ -15,6 +15,7 @@ public class CliOptions {
     private boolean insecure = false;
     private boolean allUrls = false;
     private boolean dfs = false;
+    private int maxHits = 0;
     private String output = "text";
     private int delayMs = 100;
     private boolean help = false;
@@ -61,6 +62,7 @@ public class CliOptions {
             if (params.containsKey("max-bytes")) options.maxBytes = Long.parseLong(params.get("max-bytes"));
             if (params.containsKey("timeout-ms")) options.timeoutMs = Integer.parseInt(params.get("timeout-ms"));
             if (params.containsKey("delay-ms")) options.delayMs = Integer.parseInt(params.get("delay-ms"));
+            if (params.containsKey("max-hits")) options.maxHits = Integer.parseInt(params.get("max-hits"));
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid numeric value in arguments: " + e.getMessage());
         }
@@ -95,6 +97,7 @@ public class CliOptions {
             case 'o' -> "output";
             case 'r' -> "delay-ms";
             case 's' -> "dfs";
+            case 'n' -> "max-hits";
             case 'h' -> "help";
             default -> null;
         };
@@ -109,6 +112,7 @@ public class CliOptions {
         if (maxBytes <= 0) throw new IllegalArgumentException("Max bytes must be greater than zero");
         if (timeoutMs < 0) throw new IllegalArgumentException("Timeout must be non-negative");
         if (delayMs < 0) throw new IllegalArgumentException("Delay must be non-negative");
+        if (maxHits < 0) throw new IllegalArgumentException("Max hits must be non-negative (0 = no limit)");
         if (!mode.equals("default") && !mode.equals("exact") && !mode.equals("fuzzy")) {
             throw new IllegalArgumentException("Invalid mode: " + mode + ". Use default, exact, or fuzzy.");
         }
@@ -130,6 +134,7 @@ public class CliOptions {
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -a, --all-urls           Track every URL variant including query-string duplicates");
+        System.out.println("  -n, --max-hits <n>       Stop crawling after finding n total matches (default: 0 = no limit)");
         System.out.println("  -s, --dfs                Use depth-first search instead of breadth-first search");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
@@ -149,6 +154,7 @@ public class CliOptions {
     public boolean isInsecure() { return insecure; }
     public boolean isAllUrls() { return allUrls; }
     public boolean isDfs() { return dfs; }
+    public int getMaxHits() { return maxHits; }
     public String getOutput() { return output; }
     public int getDelayMs() { return delayMs; }
     public boolean isHelp() { return help; }

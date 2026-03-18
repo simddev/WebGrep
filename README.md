@@ -33,6 +33,7 @@ java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
+- `-n, --max-hits <n>`: Stop crawling as soon as n total matches have been found (default: 0 = no limit). Pairs well with `--dfs` to surface deeply buried results quickly, or with BFS (default) to find the first N most prominent matches.
 - `-a, --all-urls`: Disable smart URL deduplication. By default, if `page?id=1` was visited, `page?id=1&sort=asc` is treated as a navigation variant and skipped. Use this flag to visit every URL regardless — useful when you want all sort/filter/pagination variants crawled.
 - `-s, --dfs`: Use depth-first search instead of the default breadth-first search. BFS explores the site level by level (all pages at depth 1 before depth 2); DFS follows each link chain as deep as possible before backtracking. DFS can find deeply buried documents faster; BFS gives more representative coverage of the whole site.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
@@ -76,9 +77,14 @@ java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 java -jar WebGrep.jar -u https://example.com/listings -k topic -d 1 --all-urls
 ```
 
-**Depth-first search to find deeply buried documents quickly:**
+**Stop after the first 5 matches (BFS — finds most prominent results first):**
 ```bash
-java -jar WebGrep.jar -u https://example.com -k "annual report" -d 3 -s
+java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2 -n 5
+```
+
+**Stop after the first 5 matches (DFS — dives deep before backtracking):**
+```bash
+java -jar WebGrep.jar -u https://example.com -k "annual report" -d 3 -s -n 5
 ```
 
 ### Document Support
