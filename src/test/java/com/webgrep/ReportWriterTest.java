@@ -74,6 +74,7 @@ public class ReportWriterTest {
         assertTrue(json.contains("\"stats\""));
         assertTrue(json.contains("\"results\""));
         assertTrue(json.contains("\"blocked\""));
+        assertTrue(json.contains("\"duration_ms\""));
         assertTrue(json.contains("\"total_matches\": 4"));
         assertTrue(json.contains("\"pages_visited\": 2"));
         assertTrue(json.contains("\"pages_parsed\": 2"));

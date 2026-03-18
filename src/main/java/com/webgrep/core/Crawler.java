@@ -123,7 +123,7 @@ public class Crawler {
                             }
                         }
 
-                        if (!dedup.isDuplicate(link) && dedup.size() < options.getMaxPages()) {
+                        if (!dedup.isDuplicate(link) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
                             dedup.markQueued(link);
                             if (options.isDfs()) {
                                 queue.addFirst(new UrlDepth(link, current.depth + 1));
@@ -148,6 +148,7 @@ public class Crawler {
             printProgress(current.url, crawlResult.visitedCount, totalMatches);
 
             if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
+                crawlResult.stoppedAtMaxHits = options.getMaxHits();
                 break;
             }
         }

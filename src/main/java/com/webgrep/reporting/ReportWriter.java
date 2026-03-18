@@ -17,9 +17,15 @@ public class ReportWriter {
         System.out.println("Pages visited: " + crawlResult.visitedCount);
         System.out.println("Pages successfully parsed: " + crawlResult.parsedCount);
 
-        System.out.println("\nDetailed Stats:");
-        for (CrawlResult.ErrorType type : CrawlResult.ErrorType.values()) {
-            System.out.println("  " + type + ": " + crawlResult.errorCounts.get(type));
+        boolean hasErrors = crawlResult.errorCounts.values().stream().anyMatch(c -> c > 0);
+        if (hasErrors) {
+            System.out.println("\nIssues:");
+            for (CrawlResult.ErrorType type : CrawlResult.ErrorType.values()) {
+                int count = crawlResult.errorCounts.get(type);
+                if (count > 0) {
+                    System.out.println("  " + errorLabel(type) + ": " + count);
+                }
+            }
         }
 
         if (totalCount > 0) {
@@ -27,7 +33,7 @@ public class ReportWriter {
             results.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
                         .thenComparing(Map.Entry.comparingByKey()))
-                .forEach(entry -> System.out.println(entry.getKey() + " (" + entry.getValue() + ")"));
+                .forEach(entry -> System.out.println("  " + entry.getKey() + " (" + entry.getValue() + ")"));
         }
 
         if (!crawlResult.blockedUrls.isEmpty()) {
@@ -35,6 +41,11 @@ public class ReportWriter {
             crawlResult.blockedUrls.forEach((url, reason) ->
                 System.out.println("  " + url + " (" + reason + ")")
             );
+        }
+
+        if (crawlResult.stoppedAtMaxHits > 0) {
+            System.out.println("\nNote: Search stopped early — max-hits limit of "
+                    + crawlResult.stoppedAtMaxHits + " reached.");
         }
     }
 
@@ -62,6 +73,9 @@ public class ReportWriter {
         }
         json.append("    }\n");
         json.append("  },\n");
+        if (crawlResult.stoppedAtMaxHits > 0) {
+            json.append("  \"stopped_early\": \"max-hits limit of ").append(crawlResult.stoppedAtMaxHits).append(" reached\",\n");
+        }
         json.append("  \"results\": [\n");
 
         List<Map.Entry<String, Integer>> sortedResults = new ArrayList<>(crawlResult.results.entrySet());
@@ -85,6 +99,16 @@ public class ReportWriter {
         json.append("  ]\n");
         json.append("}\n");
         System.out.println(json.toString());
+    }
+
+    private String errorLabel(CrawlResult.ErrorType type) {
+        return switch (type) {
+            case NETWORK_ERROR -> "Network errors";
+            case BLOCKED       -> "Blocked";
+            case PARSE_ERROR   -> "Parse errors";
+            case SKIPPED_SIZE  -> "Skipped (size limit)";
+            case SKIPPED_TYPE  -> "Skipped (type filter)";
+        };
     }
 
     private String formatDuration(long ms) {

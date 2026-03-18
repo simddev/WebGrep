@@ -18,6 +18,7 @@ public class CrawlResult {
     public int visitedCount = 0;
     public int parsedCount = 0;
     public long durationMs = 0;
+    public int stoppedAtMaxHits = 0; // 0 = ran to completion; >0 = stopped when this limit was hit
 
     public CrawlResult() {
         for (ErrorType type : ErrorType.values()) {
