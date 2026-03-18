@@ -7,7 +7,7 @@ WebGrep is a high-performance CLI crawler and keyword search tool. It searches f
 ### Architecture
 WebGrep is designed with a modular architecture for high performance and maintainability:
 - **CliOptions**: Handles advanced argument parsing and strict input validation.
-- **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays. Displays a live progress indicator during the crawl.
+- **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays. Maintains a session cookie jar across all requests, and automatically retries on HTTP 429 (rate limited) with exponential backoff before giving up. Displays a live progress indicator during the crawl.
 - **ContentExtractor**: Orchestrates intelligent text extraction from HTML pages (via Jsoup) and binary documents like PDF/DOCX (via Apache Tika), with a 30-second timeout per document to prevent hangs on corrupt or oversized files.
 - **MatchEngine**: Executes pluggable matching strategies including case-insensitive, exact, and fuzzy (Levenshtein) searches with full Unicode and diacritic support. Regex patterns are cached per run for performance.
 - **ReportWriter**: Generates human-readable text summaries or structured JSON for automation.
@@ -110,8 +110,8 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
   "stats": {
     "duration_ms": 1243,
     "total_matches": 13,
-    "pages_visited": 2,
-    "pages_parsed": 2,
+    "pages_visited": 1,
+    "pages_parsed": 1,
     "docs_parsed": 0,
     "pages_blocked": 0,
     "errors": {
@@ -123,8 +123,7 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
     }
   },
   "results": [
-    { "url": "https://iana.org/domains/example", "count": 10 },
-    { "url": "https://example.com/", "count": 3 }
+    { "url": "https://example.com/", "count": 13 }
   ],
   "blocked": [
   ]
@@ -148,7 +147,7 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
 - **JavaScript**: WebGrep processes static HTML only. It does not execute JavaScript. Pages that render content client-side (SPAs) may not be fully indexed.
 - **Bot Protection**: JavaScript-based challenges (e.g. Cloudflare Managed Challenges) cannot be bypassed. They are detected by known challenge page signatures and reported under `blocked`.
 - **Robots.txt**: The tool does not parse `robots.txt`. Use `--delay-ms` to be polite to servers.
-- **Authentication**: No support for login sessions, cookies, or HTTP Basic Auth.
+- **Authentication**: No support for login sessions or HTTP Basic Auth. Session cookies set by the server are automatically maintained across requests, but authenticated areas requiring a login form cannot be accessed.
 
 ### Build
 Requires Java 17+ and Maven.
