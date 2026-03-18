@@ -2,6 +2,7 @@ package com.webgrep.reporting;
 
 import com.webgrep.config.CliOptions;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,9 +39,22 @@ public class ReportWriter {
 
         if (!crawlResult.blockedUrls.isEmpty()) {
             System.out.println("\nBlocked / inaccessible:");
+            // Group by reason so a flood of 403s doesn't spam hundreds of lines
+            Map<String, List<String>> byReason = new LinkedHashMap<>();
             crawlResult.blockedUrls.forEach((url, reason) ->
-                System.out.println("  " + url + " (" + reason + ")")
+                byReason.computeIfAbsent(reason, r -> new ArrayList<>()).add(url)
             );
+            for (Map.Entry<String, List<String>> entry : byReason.entrySet()) {
+                List<String> urls = entry.getValue();
+                System.out.println("  " + entry.getKey() + " (" + urls.size() + "):");
+                int shown = Math.min(urls.size(), 3);
+                for (int i = 0; i < shown; i++) {
+                    System.out.println("    " + urls.get(i));
+                }
+                if (urls.size() > shown) {
+                    System.out.println("    ... and " + (urls.size() - shown) + " more");
+                }
+            }
         }
 
         if (crawlResult.stoppedAtMaxHits > 0) {
