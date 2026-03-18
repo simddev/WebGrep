@@ -2,6 +2,8 @@
 
 WebGrep is a high-performance CLI crawler and keyword search tool. It searches for keywords across websites and automatically parses binary documents — including **PDF, DOCX, TXT, and many other file formats** — discovered during the crawl, using Apache Tika for text extraction.
 
+**Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), JUnit 4 (tests).
+
 ### Architecture
 WebGrep is designed with a modular architecture for high performance and maintainability:
 - **CliOptions**: Handles advanced argument parsing and strict input validation.
@@ -15,7 +17,7 @@ WebGrep is designed with a modular architecture for high performance and maintai
 - **Depth 1**: Fetches the seed URL, then follows all links found on that page (HTML links, PDF links, document links, etc.).
 - **Depth N**: Continues recursively, following links up to N hops from the seed.
 
-Each URL is visited at most once per run. By default, URLs that differ only by query string are treated as the same page (see `--all-urls`).
+Each URL is visited at most once per run. By default, URLs that look like navigation variants of an already-visited page are skipped: if `list?id=1` was visited, then `list?id=1&sort=asc` is treated as a variant and skipped — but `list?id=2` has a different value and is treated as new content. Use `--all-urls` to disable this.
 
 ### Usage
 ```bash
@@ -31,7 +33,7 @@ java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-a, --all-urls`: Treat every URL as distinct, including query-string variants of the same page. Use this if query parameters genuinely identify different content (e.g. `?id=1` vs `?id=2`). By default, `page.html?sort=asc` and `page.html?sort=desc` are treated as the same page.
+- `-a, --all-urls`: Disable smart URL deduplication. By default, if `page?id=1` was visited, `page?id=1&sort=asc` is treated as a navigation variant and skipped. Use this flag to visit every URL regardless — useful when you want all sort/filter/pagination variants crawled.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification. Use with caution — this bypasses all TLS validation.
 - `-o, --output <format>`: Output format (`text` or `json`).
@@ -68,9 +70,9 @@ java -jar WebGrep.jar -u https://example.com -k domain -o json
 java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 ```
 
-**Crawl a site where query parameters mean different content:**
+**Crawl all sort/filter variants of a listing page:**
 ```bash
-java -jar WebGrep.jar -u https://example.com -k topic -d 1 --all-urls
+java -jar WebGrep.jar -u https://example.com/listings -k topic -d 1 --all-urls
 ```
 
 ### Document Support
@@ -135,7 +137,7 @@ Requires Java 17+ and Maven.
 ```bash
 mvn package
 ```
-Produces `target/WebGrep-1.0-SNAPSHOT.jar` — a self-contained fat JAR with all dependencies included. No additional installation required.
+Produces `target/WebGrep-1.0.0.jar` — a self-contained fat JAR with all dependencies included. No additional installation required.
 
 ---
 
