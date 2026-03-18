@@ -27,6 +27,34 @@ public class ContentExtractorTest {
     }
 
     @Test
+    public void testHttpNormalizedToHttps() {
+        // http:// and https:// links to the same path must normalize to https:// so dedup works
+        String html = "<html><body>" +
+            "<a href=\"http://example.com/page\">HTTP Link</a>" +
+            "<a href=\"https://example.com/page\">HTTPS Link</a>" +
+            "</body></html>";
+        Document doc = Jsoup.parse(html, "https://example.com");
+        byte[] raw = html.getBytes(StandardCharsets.UTF_8);
+        List<String> links = extractor.extractLinks(doc, raw, "https://example.com");
+        assertTrue(links.stream().allMatch(l -> l.startsWith("https://")));
+        // Only one unique URL after normalization
+        assertEquals(1, links.size());
+    }
+
+    @Test
+    public void testAmpEntitiesDecodedInRawFallback() {
+        // Raw HTML has &amp; in href query strings; the regex fallback must decode them
+        // so they match the Jsoup-decoded version and not create duplicate entries
+        String emptyDoc = "<html><body></body></html>";
+        String rawHtml = "<html><body><a href='https://example.com/page?a=1&amp;b=2'>Link</a></body></html>";
+        Document doc = Jsoup.parse(emptyDoc, "https://example.com");
+        byte[] raw = rawHtml.getBytes(StandardCharsets.UTF_8);
+        List<String> links = extractor.extractLinks(doc, raw, "https://example.com");
+        assertFalse(links.stream().anyMatch(l -> l.contains("&amp;")));
+        assertTrue(links.stream().anyMatch(l -> l.contains("a=1&b=2")));
+    }
+
+    @Test
     public void testExtractLinksDoubleQuotes() {
         String html = "<html><body>" +
             "<a href=\"http://example.com/page1\">Link</a>" +

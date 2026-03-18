@@ -33,7 +33,7 @@ public class UrlUtils {
         }
         try {
             URL url = new URL(urlString);
-            String protocol = url.getProtocol().toLowerCase();
+            String protocol = url.getProtocol().equalsIgnoreCase("http") ? "https" : url.getProtocol().toLowerCase();
             String host = url.getHost().toLowerCase();
             if (host.isEmpty()) return "";
 
