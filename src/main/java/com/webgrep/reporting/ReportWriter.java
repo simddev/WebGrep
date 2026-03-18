@@ -30,10 +30,10 @@ public class ReportWriter {
         }
 
         if (!crawlResult.blockedUrls.isEmpty()) {
-            System.out.println("\nNotice: Some URLs were blocked or could not be fully processed:");
-            crawlResult.blockedUrls.forEach((url, reason) -> {
-                System.out.println("Couldn't retrieve all links from the URL, blocked because of " + reason + ": " + url);
-            });
+            System.out.println("\nBlocked / inaccessible:");
+            crawlResult.blockedUrls.forEach((url, reason) ->
+                System.out.println("  " + url + " (" + reason + ")")
+            );
         }
     }
 
