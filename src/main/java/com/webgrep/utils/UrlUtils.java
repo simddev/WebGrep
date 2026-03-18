@@ -34,6 +34,7 @@ public class UrlUtils {
         try {
             URL url = new URL(urlString);
             String protocol = url.getProtocol().toLowerCase();
+            if (!protocol.equals("http") && !protocol.equals("https")) return "";
             String host = url.getHost().toLowerCase();
             if (host.isEmpty()) return "";
 
