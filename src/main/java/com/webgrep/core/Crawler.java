@@ -175,8 +175,9 @@ public class Crawler {
 
     private void printProgress(String currentUrl, int visited, int matches) {
         String truncated = currentUrl.length() > 60 ? currentUrl.substring(0, 57) + "..." : currentUrl;
-        System.err.printf("\r%c  %d pages visited  |  %d matches found  |  %s",
+        String line = String.format("%c  %d pages visited  |  %d matches found  |  %s",
                 SPINNER[spinnerIdx++ % SPINNER.length], visited, matches, truncated);
+        System.err.printf("\r%-120s", line);
     }
 
     private record UrlDepth(String url, int depth) {}
