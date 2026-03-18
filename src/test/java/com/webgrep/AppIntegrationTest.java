@@ -23,20 +23,26 @@ public class AppIntegrationTest {
     }
 
     @Test
-    public void testInvalidArgs() {
-        ByteArrayOutputStream errContent = new ByteArrayOutputStream();
-        System.setErr(new PrintStream(errContent));
+    public void testHelpShortFlag() {
+        ByteArrayOutputStream outContent = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(outContent));
 
-        // This will call System.exit(1), so we might need a custom security manager
-        // or just test the logic without calling Main.main if it exits.
-        // For simplicity in this environment, let's just test that CliOptions throws.
+        Main.main(new String[]{"-h"});
+
+        String output = outContent.toString();
+        assertTrue(output.contains("Usage: java -jar WebGrep.jar"));
+        System.setOut(System.out);
     }
 
     @Test
-    public void testLocalCrawlConstraints() {
-        // This would ideally use a local mock server, but we can test the Crawler logic
-        // with a depth of 0 to avoid external networking if possible.
-        // Since we can't easily mock the network here without adding dependencies,
-        // we'll stick to unit tests for constraints in the CrawlerTest if we had one.
+    public void testNoArgsShowsHelp() {
+        ByteArrayOutputStream outContent = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(outContent));
+
+        Main.main(new String[]{});
+
+        String output = outContent.toString();
+        assertTrue(output.contains("Usage: java -jar WebGrep.jar"));
+        System.setOut(System.out);
     }
 }

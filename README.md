@@ -108,6 +108,7 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
     "mode": "default"
   },
   "stats": {
+    "duration_ms": 1243,
     "total_matches": 13,
     "pages_visited": 2,
     "pages_parsed": 2,
@@ -129,14 +130,16 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
 }
 ```
 
-#### JSON Error Fields
+#### JSON Fields Reference
 | Field | Meaning |
 |---|---|
-| `network_error` | Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
-| `blocked` | Server returned 403 or 429, or a bot-protection challenge was detected |
-| `skipped_size` | File exceeded `--max-bytes` and was not parsed |
-| `parse_error` | Reserved for future use |
-| `skipped_type` | Reserved for future use |
+| `stats.duration_ms` | Wall-clock time for the entire crawl in milliseconds |
+| `stopped_early` | Present only when `--max-hits` triggered an early exit; describes the limit that was reached |
+| `stats.errors.network_error` | Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
+| `stats.errors.blocked` | Server returned 403 or 429, or a bot-protection challenge was detected |
+| `stats.errors.skipped_size` | File exceeded `--max-bytes` and was not parsed |
+| `stats.errors.parse_error` | Reserved for future use |
+| `stats.errors.skipped_type` | Reserved for future use |
 
 ### Limitations
 - **JavaScript**: WebGrep processes static HTML only. It does not execute JavaScript. Pages that render content client-side (SPAs) may not be fully indexed.
