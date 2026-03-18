@@ -153,7 +153,7 @@ public class Crawler {
             }
         }
 
-        System.err.print("\r" + " ".repeat(100) + "\r");
+        System.err.print("\r" + " ".repeat(120) + "\r");
         return crawlResult;
     }
 
