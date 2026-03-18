@@ -29,6 +29,9 @@ public class ContentExtractor {
         return t;
     });
 
+    private static final Pattern LINK_PATTERN =
+            Pattern.compile("href\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+
     public ContentExtractor(long maxBytes) {
         this.tika = new Tika();
         this.tika.setMaxStringLength((int) Math.min(maxBytes, Integer.MAX_VALUE));
@@ -99,8 +102,7 @@ public class ContentExtractor {
 
         if (links.size() < MAX_LINKS_PER_PAGE) {
             String bodyStr = new String(rawBody, StandardCharsets.UTF_8);
-            Pattern linkPattern = Pattern.compile("href\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
-            Matcher linkMatcher = linkPattern.matcher(bodyStr);
+            Matcher linkMatcher = LINK_PATTERN.matcher(bodyStr);
             while (linkMatcher.find() && links.size() < MAX_LINKS_PER_PAGE) {
                 String href = linkMatcher.group(1);
                 String normalizedLink = UrlUtils.normalizeUrl(href, baseUrl);

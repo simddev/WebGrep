@@ -1,23 +1,25 @@
 # WebGrep
 
-WebGrep is a high-performance CLI crawler and keyword search tool. It searches for keywords across websites and automatically parses binary documents — including **PDF, DOCX, TXT, and other file formats** — discovered during the crawl, using Apache Tika for text extraction.
+WebGrep is a high-performance CLI crawler and keyword search tool. It searches for keywords across websites and automatically parses binary documents — including **PDF, DOCX, TXT, and many other file formats** — discovered during the crawl, using Apache Tika for text extraction.
 
 ### Architecture
 WebGrep is designed with a modular architecture for high performance and maintainability:
 - **CliOptions**: Handles advanced argument parsing and strict input validation.
-- **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays.
-- **ContentExtractor**: Orchestrates intelligent text extraction from HTML pages (via Jsoup) and binary documents like PDF/DOCX (via Apache Tika), with a 30-second timeout per document to prevent hangs on corrupt files.
-- **MatchEngine**: Executes pluggable matching strategies including case-insensitive, exact, and fuzzy (Levenshtein) searches with full Unicode and diacritic support.
+- **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays. Displays a live progress indicator during the crawl.
+- **ContentExtractor**: Orchestrates intelligent text extraction from HTML pages (via Jsoup) and binary documents like PDF/DOCX (via Apache Tika), with a 30-second timeout per document to prevent hangs on corrupt or oversized files.
+- **MatchEngine**: Executes pluggable matching strategies including case-insensitive, exact, and fuzzy (Levenshtein) searches with full Unicode and diacritic support. Regex patterns are cached per run for performance.
 - **ReportWriter**: Generates human-readable text summaries or structured JSON for automation.
 
 ### Depth Definition
-- **Depth 0**: Scans only the provided seed URL.
-- **Depth 1**: Scans the seed URL and all immediate links discovered on that page (including linked PDFs and documents).
-- **Depth N**: Continues recursively up to N levels.
+- **Depth 0**: Fetches and searches only the provided seed URL. No links are followed.
+- **Depth 1**: Fetches the seed URL, then follows all links found on that page (HTML links, PDF links, document links, etc.).
+- **Depth N**: Continues recursively, following links up to N hops from the seed.
+
+Each URL is visited at most once per run. By default, URLs that differ only by query string are treated as the same page (see `--all-urls`).
 
 ### Usage
 ```bash
-java -jar WebGrep.jar --url <URL> --keyword <keyword> [options]
+java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 ```
 
 #### Options:
@@ -25,20 +27,20 @@ java -jar WebGrep.jar --url <URL> --keyword <keyword> [options]
 - `-k, --keyword <word>`: The keyword to search for (required).
 - `-d, --depth <n>`: Maximum crawl depth (default: 1).
 - `-m, --mode <mode>`: Match strategy (`default`, `exact`, `fuzzy`).
-- `-p, --max-pages <n>`: Stop after crawling N pages (default: 5000).
+- `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000).
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-a, --all-urls`: Track every URL variant as a distinct page, including query-string duplicates (e.g. same page with different sort parameters). By default, URLs differing only by query string are deduplicated.
+- `-a, --all-urls`: Treat every URL as distinct, including query-string variants of the same page. Use this if query parameters genuinely identify different content (e.g. `?id=1` vs `?id=2`). By default, `page.html?sort=asc` and `page.html?sort=desc` are treated as the same page.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
-- `-i, --insecure`: Disable SSL certificate verification (use with caution).
+- `-i, --insecure`: Disable SSL certificate verification. Use with caution — this bypasses all TLS validation.
 - `-o, --output <format>`: Output format (`text` or `json`).
 - `-h, --help`: Show help message.
 
 ### Matching Modes
-- **Default**: Case-insensitive matching with Unicode and diacritic support (e.g. `cafe` matches `Café`).
-- **Exact**: Strict case-sensitive literal matching.
-- **Fuzzy**: Normalizes diacritics, ignores punctuation, and applies Levenshtein distance to catch typos and close variations.
+- **Default**: Case-insensitive matching with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. If no direct match is found, a simplified (diacritic-stripped, punctuation-removed) fallback pass is attempted.
+- **Exact**: Strict case-sensitive literal matching. `hello` does not match `Hello`.
+- **Fuzzy**: First tries a normalized (diacritic-stripped, punctuation-removed) substring match. If nothing is found, splits the text into words and accepts any word within a Levenshtein edit distance of 1 (for keywords of 4 characters or fewer) or 2 (for longer keywords). This catches common typos and minor spelling variations.
 
 ### Examples
 **Basic search:**
@@ -46,7 +48,7 @@ java -jar WebGrep.jar --url <URL> --keyword <keyword> [options]
 java -jar WebGrep.jar -u https://example.com -k domain
 ```
 
-**Search across a site including linked PDFs and documents:**
+**Deep crawl including linked PDFs and documents:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2
 ```
@@ -56,23 +58,31 @@ java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2
 java -jar WebGrep.jar -u https://example.com/report.pdf -k "revenue" -d 0
 ```
 
-**JSON output with detailed metrics:**
+**JSON output:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k domain -o json
 ```
 
-**Fast crawl with no delay:**
+**Fast crawl with no delay between requests:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 ```
 
-### Document Support
-WebGrep automatically detects and searches the following file types when encountered during a crawl or when passed directly as the seed URL:
-- **PDF** (`.pdf`)
-- **Word documents** (`.doc`, `.docx`)
-- **Plain text** (`.txt`)
+**Crawl a site where query parameters mean different content:**
+```bash
+java -jar WebGrep.jar -u https://example.com -k topic -d 1 --all-urls
+```
 
-Other file types (images, video, CSS, JS, archives, fonts) are skipped automatically.
+### Document Support
+WebGrep automatically detects and extracts text from any linked document using Apache Tika. Supported formats include:
+- **PDF** (`.pdf`)
+- **Word** (`.doc`, `.docx`)
+- **Plain text** (`.txt`)
+- **And many more** — Tika supports 100+ formats including ODT, RTF, EPUB, XLS, XLSX, PPT, PPTX, and more. Any file whose link passes the URL filter will be parsed.
+
+Each binary document is parsed with a **30-second timeout**. If parsing takes longer (e.g. a corrupt or malformed file), it is skipped and the raw bytes are used as a fallback.
+
+Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives, social share links) are filtered by URL before any request is made.
 
 ### Sample Output (JSON)
 ```json
@@ -105,20 +115,30 @@ Other file types (images, video, CSS, JS, archives, fonts) are skipped automatic
 }
 ```
 
+#### JSON Error Fields
+| Field | Meaning |
+|---|---|
+| `network_error` | Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
+| `blocked` | Server returned 403 or 429, or a bot-protection challenge was detected |
+| `skipped_size` | File exceeded `--max-bytes` and was not parsed |
+| `parse_error` | Reserved for future use |
+| `skipped_type` | Reserved for future use |
+
 ### Limitations
-- **JavaScript**: WebGrep processes static content only. It does not execute JavaScript (SPA content may not be fully indexed).
-- **Bot Protection**: JavaScript-based challenges (like Cloudflare Managed Challenges) cannot be bypassed, but are detected and reported.
-- **Robots.txt**: The tool does not parse `robots.txt`.
+- **JavaScript**: WebGrep processes static HTML only. It does not execute JavaScript. Pages that render content client-side (SPAs) may not be fully indexed.
+- **Bot Protection**: JavaScript-based challenges (e.g. Cloudflare Managed Challenges) cannot be bypassed. They are detected by known challenge page signatures and reported under `blocked`.
+- **Robots.txt**: The tool does not parse `robots.txt`. Use `--delay-ms` to be polite to servers.
+- **Authentication**: No support for login sessions, cookies, or HTTP Basic Auth.
 
 ### Build
 Requires Java 17+ and Maven.
 ```bash
 mvn package
 ```
-Produces `target/WebGrep-1.0-SNAPSHOT.jar`.
+Produces `target/WebGrep-1.0-SNAPSHOT.jar` — a self-contained fat JAR with all dependencies included. No additional installation required.
 
 ---
-  
-Written by and belongs to Simon D.  
-Free to use for personal and educational purposes.  
-For commercial use please contact me at simon.d.dev@proton.me.  
+
+Written by and belongs to Simon D.
+Free to use for personal and educational purposes.
+For commercial use please contact me at simon.d.dev@proton.me.

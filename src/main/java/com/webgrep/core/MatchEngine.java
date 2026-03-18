@@ -6,6 +6,21 @@ import java.util.regex.Pattern;
 
 public class MatchEngine {
 
+    private String cachedKeyword;
+    private String cachedMode;
+    private Pattern cachedPattern;
+
+    private Pattern getPattern(String keyword, String mode) {
+        if (!keyword.equals(cachedKeyword) || !mode.equals(cachedMode)) {
+            cachedKeyword = keyword;
+            cachedMode = mode;
+            cachedPattern = mode.equals("exact")
+                    ? Pattern.compile(Pattern.quote(keyword))
+                    : Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        }
+        return cachedPattern;
+    }
+
     public int countMatches(String text, String keyword, String mode) {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) {
             return 0;
@@ -13,8 +28,7 @@ public class MatchEngine {
 
         if (mode.equals("exact")) {
             int count = 0;
-            Pattern pattern = Pattern.compile(Pattern.quote(keyword));
-            Matcher matcher = pattern.matcher(text);
+            Matcher matcher = getPattern(keyword, mode).matcher(text);
             while (matcher.find()) {
                 count++;
             }
@@ -25,8 +39,7 @@ public class MatchEngine {
             // Default: case-insensitive
             int count = 0;
             String processedText = text.replace('\u00A0', ' ');
-            Pattern pattern = Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-            Matcher matcher = pattern.matcher(processedText);
+            Matcher matcher = getPattern(keyword, mode).matcher(processedText);
             while (matcher.find()) {
                 count++;
             }
