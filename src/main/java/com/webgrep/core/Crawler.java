@@ -10,7 +10,10 @@ import javax.net.ssl.*;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
 
 public class Crawler {
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
@@ -20,12 +23,14 @@ public class Crawler {
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
     private final String startHost;
+    private final UrlDeduplicator dedup;
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
         this.options = options;
         this.extractor = extractor;
         this.matchEngine = matchEngine;
         this.startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
+        this.dedup = new UrlDeduplicator(options.isAllUrls());
 
         if (options.isInsecure()) {
             setupSsl();
@@ -40,55 +45,13 @@ public class Crawler {
         }
     }
 
-    // All URLs that have been added to the crawl queue (exact URL strings)
-    private final Set<String> queued = new HashSet<>();
-    // For smart dedup: base path (no query) → canonical key=value pairs from first queuing
-    private final Map<String, Set<String>> canonicalPathParams = new HashMap<>();
-
-    private boolean isAlreadyQueued(String url) {
-        if (queued.contains(url)) return true;
-        if (options.isAllUrls()) return false;
-
-        int q = url.indexOf('?');
-        if (q == -1) {
-            // No query params: duplicate if we've seen this base path before (with or without params)
-            return canonicalPathParams.containsKey(url);
-        }
-
-        String base = url.substring(0, q);
-        if (!canonicalPathParams.containsKey(base)) return false;
-
-        Set<String> canonical = canonicalPathParams.get(base);
-        if (canonical.isEmpty()) return true; // base was visited without params; any parameterized variant is a dup
-
-        // Parse new URL's params as key=value tokens
-        Set<String> newParams = new HashSet<>(Arrays.asList(url.substring(q + 1).split("&")));
-        // Duplicate if new URL contains all canonical key=value pairs (same keys AND same values)
-        // e.g. ?subjkod=207020&r=agenda is a dup of ?subjkod=207020, but ?souborid=1234 is not a dup of ?souborid=9477999
-        return newParams.containsAll(canonical);
-    }
-
-    private void markQueued(String url) {
-        queued.add(url);
-        if (options.isAllUrls()) return;
-
-        int q = url.indexOf('?');
-        String base = q != -1 ? url.substring(0, q) : url;
-        if (!canonicalPathParams.containsKey(base)) {
-            Set<String> params = q != -1
-                    ? new HashSet<>(Arrays.asList(url.substring(q + 1).split("&")))
-                    : Collections.emptySet();
-            canonicalPathParams.put(base, params);
-        }
-    }
-
     public CrawlResult crawl() {
         CrawlResult crawlResult = new CrawlResult();
         Queue<UrlDepth> queue = new LinkedList<>();
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
         queue.add(new UrlDepth(normalizedStart, 0));
-        markQueued(normalizedStart);
+        dedup.markQueued(normalizedStart);
 
         while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
             UrlDepth current = queue.poll();
@@ -160,8 +123,8 @@ public class Crawler {
                             }
                         }
 
-                        if (!isAlreadyQueued(link) && queued.size() < options.getMaxPages()) {
-                            markQueued(link);
+                        if (!dedup.isDuplicate(link) && dedup.size() < options.getMaxPages()) {
+                            dedup.markQueued(link);
                             queue.add(new UrlDepth(link, current.depth + 1));
                         }
                     }
