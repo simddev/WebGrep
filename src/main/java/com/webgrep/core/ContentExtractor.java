@@ -95,7 +95,7 @@ public class ContentExtractor {
                 link = element.attr("href");
             }
             String normalizedLink = UrlUtils.normalizeUrl(link, baseUrl);
-            if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink) && !links.contains(normalizedLink)) {
+            if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink)) {
                 links.add(normalizedLink);
             }
         }
