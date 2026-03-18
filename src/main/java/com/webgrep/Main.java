@@ -30,7 +30,7 @@ public class Main {
 
             options.validate();
 
-            ContentExtractor extractor = new ContentExtractor();
+            ContentExtractor extractor = new ContentExtractor(options.getMaxBytes());
             MatchEngine matchEngine = new MatchEngine();
             Crawler crawler = new Crawler(options, extractor, matchEngine);
 

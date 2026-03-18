@@ -35,7 +35,7 @@ public class CliOptions {
             }
 
             if (key != null) {
-                if (hasValue && i + 1 < args.length && !args[i + 1].startsWith("-")) {
+                if (hasValue && i + 1 < args.length && (!args[i + 1].startsWith("-") || args[i + 1].matches("-\\d.*"))) {
                     params.put(key, args[i + 1]);
                     i++;
                 } else {

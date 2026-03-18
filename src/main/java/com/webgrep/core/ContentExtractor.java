@@ -22,8 +22,9 @@ public class ContentExtractor {
     private final Tika tika;
     private static final int MAX_LINKS_PER_PAGE = 5000;
 
-    public ContentExtractor() {
+    public ContentExtractor(long maxBytes) {
         this.tika = new Tika();
+        this.tika.setMaxStringLength((int) Math.min(maxBytes, Integer.MAX_VALUE));
     }
 
     public String extractTextFromHtml(Document doc) {
@@ -48,7 +49,6 @@ public class ContentExtractor {
                 metadata.set(HttpHeaders.CONTENT_TYPE, contentType);
             }
 
-            tika.setMaxStringLength(-1);
             String content = tika.parseToString(bis, metadata);
 
             if (content == null || content.trim().isEmpty()) {

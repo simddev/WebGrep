@@ -87,6 +87,6 @@ public class ReportWriter {
 
     private String escapeJson(String input) {
         if (input == null) return "";
-        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 }

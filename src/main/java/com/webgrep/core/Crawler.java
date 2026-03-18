@@ -152,13 +152,5 @@ public class Crawler {
         } catch (Exception ignored) {}
     }
 
-    private static class UrlDepth {
-        final String url;
-        final int depth;
-
-        UrlDepth(String url, int depth) {
-            this.url = url;
-            this.depth = depth;
-        }
-    }
+    private record UrlDepth(String url, int depth) {}
 }

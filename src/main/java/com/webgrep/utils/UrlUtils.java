@@ -87,8 +87,6 @@ public class UrlUtils {
                 || lower.contains("googleads") || lower.contains("doubleclick")
                 || lower.contains("facebook.com/sharer") || lower.contains("twitter.com/intent/tweet")
                 || lower.contains("linkedin.com/share") || lower.contains("pinterest.com/pin")
-                || lower.contains("/tag/") || lower.contains("/tags/") || lower.contains("/author/")
-                || lower.contains("video.klix.ba") || lower.contains("static.klix.ba")
-                || lower.contains("sdk.privacy-center.org");
+                || lower.contains("/tag/") || lower.contains("/tags/") || lower.contains("/author/");
     }
 }
