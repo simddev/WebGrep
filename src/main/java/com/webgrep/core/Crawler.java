@@ -27,14 +27,15 @@ public class Crawler {
     private final CliOptions options;
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
-    private final String startHost;
+    private final String startDomain;
     private final UrlDeduplicator dedup;
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
         this.options = options;
         this.extractor = extractor;
         this.matchEngine = matchEngine;
-        this.startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
+        String startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
+        this.startDomain = startHost.startsWith("www.") ? startHost.substring(4) : startHost;
         this.dedup = new UrlDeduplicator(options.isAllUrls());
 
         if (options.isInsecure()) {
@@ -48,6 +49,11 @@ public class Crawler {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private boolean isSameDomain(String linkHost) {
+        String h = linkHost.toLowerCase();
+        return h.equals(startDomain) || h.endsWith("." + startDomain);
     }
 
     public CrawlResult crawl() {
@@ -118,7 +124,7 @@ public class Crawler {
                     for (String link : links) {
                         if (!options.isAllowExternal()) {
                             String linkHost = extractHost(link);
-                            if (!linkHost.equalsIgnoreCase(startHost)) {
+                            if (!isSameDomain(linkHost)) {
                                 continue;
                             }
                         }
