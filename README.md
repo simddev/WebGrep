@@ -28,7 +28,7 @@ java -jar WebGrep.jar --url <URL> --keyword <keyword> [options]
 - `-p, --max-pages <n>`: Stop after crawling N pages (default: 5000).
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
-- `--delay-ms <n>`: Delay between requests in milliseconds (default: 100).
+- `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification (use with caution).
 - `-o, --output <format>`: Output format (`text` or `json`).
@@ -62,7 +62,7 @@ java -jar WebGrep.jar -u https://example.com -k domain -o json
 
 **Fast crawl with no delay:**
 ```bash
-java -jar WebGrep.jar -u https://example.com -k topic -d 2 --delay-ms 0
+java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 ```
 
 ### Document Support
