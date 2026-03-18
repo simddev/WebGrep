@@ -40,14 +40,55 @@ public class Crawler {
         }
     }
 
+    // All URLs that have been added to the crawl queue (exact URL strings)
+    private final Set<String> queued = new HashSet<>();
+    // For smart dedup: base path (no query) → canonical key=value pairs from first queuing
+    private final Map<String, Set<String>> canonicalPathParams = new HashMap<>();
+
+    private boolean isAlreadyQueued(String url) {
+        if (queued.contains(url)) return true;
+        if (options.isAllUrls()) return false;
+
+        int q = url.indexOf('?');
+        if (q == -1) {
+            // No query params: duplicate if we've seen this base path before (with or without params)
+            return canonicalPathParams.containsKey(url);
+        }
+
+        String base = url.substring(0, q);
+        if (!canonicalPathParams.containsKey(base)) return false;
+
+        Set<String> canonical = canonicalPathParams.get(base);
+        if (canonical.isEmpty()) return true; // base was visited without params; any parameterized variant is a dup
+
+        // Parse new URL's params as key=value tokens
+        Set<String> newParams = new HashSet<>(Arrays.asList(url.substring(q + 1).split("&")));
+        // Duplicate if new URL contains all canonical key=value pairs (same keys AND same values)
+        // e.g. ?subjkod=207020&r=agenda is a dup of ?subjkod=207020, but ?souborid=1234 is not a dup of ?souborid=9477999
+        return newParams.containsAll(canonical);
+    }
+
+    private void markQueued(String url) {
+        queued.add(url);
+        if (options.isAllUrls()) return;
+
+        int q = url.indexOf('?');
+        String base = q != -1 ? url.substring(0, q) : url;
+        if (!canonicalPathParams.containsKey(base)) {
+            Set<String> params = q != -1
+                    ? new HashSet<>(Arrays.asList(url.substring(q + 1).split("&")))
+                    : Collections.emptySet();
+            canonicalPathParams.put(base, params);
+        }
+    }
+
     public CrawlResult crawl() {
         CrawlResult crawlResult = new CrawlResult();
-        Set<String> visited = new HashSet<>();
         Queue<UrlDepth> queue = new LinkedList<>();
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
         queue.add(new UrlDepth(normalizedStart, 0));
-        visited.add(dedupeKey(normalizedStart));
+        markQueued(normalizedStart);
 
         while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
             UrlDepth current = queue.poll();
@@ -119,9 +160,8 @@ public class Crawler {
                             }
                         }
 
-                        String key = dedupeKey(link);
-                        if (!visited.contains(key) && visited.size() < options.getMaxPages()) {
-                            visited.add(key);
+                        if (!isAlreadyQueued(link) && queued.size() < options.getMaxPages()) {
+                            markQueued(link);
                             queue.add(new UrlDepth(link, current.depth + 1));
                         }
                     }
@@ -159,12 +199,6 @@ public class Crawler {
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
         } catch (Exception ignored) {}
-    }
-
-    private String dedupeKey(String url) {
-        if (options.isAllUrls()) return url;
-        int q = url.indexOf('?');
-        return q != -1 ? url.substring(0, q) : url;
     }
 
     private void printProgress(String currentUrl, int visited, int matches) {
