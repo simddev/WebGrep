@@ -2,6 +2,7 @@ package com.webgrep;
 
 import com.webgrep.config.CliOptions;
 import com.webgrep.core.MatchEngine;
+import com.webgrep.reporting.CrawlResult;
 import com.webgrep.utils.UrlUtils;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -61,6 +62,57 @@ public class MainTest {
     @Test(expected = IllegalArgumentException.class)
     public void testCliOptionsMissingUrl() {
         String[] args = {"-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
+    public void testIsIgnoredLink() {
+        // Should be ignored
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/style.css"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/IMAGE.PNG")); // case-insensitive
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/script.js"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/video.mp4"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/archive.zip"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/font.woff2"));
+        assertTrue(UrlUtils.isIgnoredLink("https://www.facebook.com/sharer/share"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/author/john"));
+        assertTrue(UrlUtils.isIgnoredLink("http://example.com/tag/java"));
+
+        // Should NOT be ignored
+        assertFalse(UrlUtils.isIgnoredLink("http://example.com/report.pdf"));
+        assertFalse(UrlUtils.isIgnoredLink("http://example.com/document.docx"));
+        assertFalse(UrlUtils.isIgnoredLink("http://example.com/readme.txt"));
+        assertFalse(UrlUtils.isIgnoredLink("http://example.com/page"));
+        assertFalse(UrlUtils.isIgnoredLink("http://example.com/page?q=test"));
+    }
+
+    @Test
+    public void testCrawlResult() {
+        CrawlResult result = new CrawlResult();
+        result.addMatch("http://example.com", 5);
+        result.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
+        result.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
+        result.addBlocked("http://blocked.com", "403");
+
+        assertEquals(5, (int) result.results.get("http://example.com"));
+        assertEquals(2, (int) result.errorCounts.get(CrawlResult.ErrorType.NETWORK_ERROR));
+        assertEquals(0, (int) result.errorCounts.get(CrawlResult.ErrorType.PARSE_ERROR));
+        assertEquals(1, (int) result.errorCounts.get(CrawlResult.ErrorType.BLOCKED));
+        assertEquals("403", result.blockedUrls.get("http://blocked.com"));
+    }
+
+    @Test
+    public void testDelayMsOption() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--delay-ms", "500"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals(500, options.getDelayMs());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testDelayMsNegative() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--delay-ms", "-1"};
         CliOptions options = CliOptions.parse(args);
         options.validate();
     }

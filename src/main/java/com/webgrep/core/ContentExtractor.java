@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -21,6 +22,12 @@ import com.webgrep.utils.UrlUtils;
 public class ContentExtractor {
     private final Tika tika;
     private static final int MAX_LINKS_PER_PAGE = 5000;
+    private static final int TIKA_TIMEOUT_SECONDS = 30;
+    private static final ExecutorService TIKA_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r);
+        t.setDaemon(true);
+        return t;
+    });
 
     public ContentExtractor(long maxBytes) {
         this.tika = new Tika();
@@ -42,23 +49,36 @@ public class ContentExtractor {
     }
 
     public String extractTextFromBinary(byte[] body, String url, String contentType) {
-        try (InputStream bis = new ByteArrayInputStream(body)) {
+        try {
             Metadata metadata = new Metadata();
             metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, url);
             if (contentType != null) {
                 metadata.set(HttpHeaders.CONTENT_TYPE, contentType);
             }
 
-            String content = tika.parseToString(bis, metadata);
-
+            String content = tikaParseWithTimeout(body, metadata);
             if (content == null || content.trim().isEmpty()) {
-                try (InputStream bis2 = new ByteArrayInputStream(body)) {
-                    content = tika.parseToString(bis2);
-                }
+                content = tikaParseWithTimeout(body, null);
             }
-            return content;
+            return content != null ? content : new String(body, StandardCharsets.UTF_8);
         } catch (Throwable t) {
             return new String(body, StandardCharsets.UTF_8);
+        }
+    }
+
+    private String tikaParseWithTimeout(byte[] body, Metadata metadata) {
+        Future<String> future = TIKA_EXECUTOR.submit(() -> {
+            try (InputStream is = new ByteArrayInputStream(body)) {
+                return metadata != null ? tika.parseToString(is, metadata) : tika.parseToString(is);
+            }
+        });
+        try {
+            return future.get(TIKA_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -79,7 +99,7 @@ public class ContentExtractor {
 
         if (links.size() < MAX_LINKS_PER_PAGE) {
             String bodyStr = new String(rawBody, StandardCharsets.UTF_8);
-            Pattern linkPattern = Pattern.compile("href\\s*=\\s*\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
+            Pattern linkPattern = Pattern.compile("href\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
             Matcher linkMatcher = linkPattern.matcher(bodyStr);
             while (linkMatcher.find() && links.size() < MAX_LINKS_PER_PAGE) {
                 String href = linkMatcher.group(1);

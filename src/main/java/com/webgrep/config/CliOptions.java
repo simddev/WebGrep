@@ -14,6 +14,7 @@ public class CliOptions {
     private boolean allowExternal = false;
     private boolean insecure = false;
     private String output = "text";
+    private int delayMs = 100;
     private boolean help = false;
 
     public static CliOptions parse(String[] args) {
@@ -57,6 +58,7 @@ public class CliOptions {
             if (params.containsKey("max-pages")) options.maxPages = Integer.parseInt(params.get("max-pages"));
             if (params.containsKey("max-bytes")) options.maxBytes = Long.parseLong(params.get("max-bytes"));
             if (params.containsKey("timeout-ms")) options.timeoutMs = Integer.parseInt(params.get("timeout-ms"));
+            if (params.containsKey("delay-ms")) options.delayMs = Integer.parseInt(params.get("delay-ms"));
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid numeric value in arguments: " + e.getMessage());
         }
@@ -99,6 +101,7 @@ public class CliOptions {
         if (maxPages <= 0) throw new IllegalArgumentException("Max pages must be greater than zero");
         if (maxBytes <= 0) throw new IllegalArgumentException("Max bytes must be greater than zero");
         if (timeoutMs < 0) throw new IllegalArgumentException("Timeout must be non-negative");
+        if (delayMs < 0) throw new IllegalArgumentException("Delay must be non-negative");
         if (!mode.equals("default") && !mode.equals("exact") && !mode.equals("fuzzy")) {
             throw new IllegalArgumentException("Invalid mode: " + mode + ". Use default, exact, or fuzzy.");
         }
@@ -118,6 +121,7 @@ public class CliOptions {
         System.out.println("  -p, --max-pages <n>      Maximum number of pages to crawl (default: 5000)");
         System.out.println("  -b, --max-bytes <n>      Maximum file size in bytes (default: 10MB)");
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
+        System.out.println("  --delay-ms <n>           Delay between requests in milliseconds (default: 100)");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
@@ -135,5 +139,6 @@ public class CliOptions {
     public boolean isAllowExternal() { return allowExternal; }
     public boolean isInsecure() { return insecure; }
     public String getOutput() { return output; }
+    public int getDelayMs() { return delayMs; }
     public boolean isHelp() { return help; }
 }

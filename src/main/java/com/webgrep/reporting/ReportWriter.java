@@ -87,6 +87,23 @@ public class ReportWriter {
 
     private String escapeJson(String input) {
         if (input == null) return "";
-        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        StringBuilder sb = new StringBuilder();
+        for (char c : input.toCharArray()) {
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"'  -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default   -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 }

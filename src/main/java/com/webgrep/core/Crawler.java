@@ -50,10 +50,11 @@ public class Crawler {
             UrlDepth current = queue.poll();
 
             try {
-                Thread.sleep(100);
+                Thread.sleep(options.getDelayMs());
 
                 org.jsoup.Connection.Response response = Jsoup.connect(current.url)
                         .timeout(options.getTimeoutMs())
+                        .maxBodySize((int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE))
                         .followRedirects(true)
                         .ignoreContentType(true)
                         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
