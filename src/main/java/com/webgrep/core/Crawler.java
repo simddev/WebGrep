@@ -87,6 +87,11 @@ public class Crawler {
                 cookieJar.putAll(response.cookies());
                 // Use the final URL after redirects as the canonical URL for this page
                 String effectiveUrl = response.url().toString();
+                // If the server redirected us, mark the effective URL as queued so that
+                // any other page linking directly to it is not visited a second time.
+                if (!effectiveUrl.equals(current.url)) {
+                    dedup.markQueued(effectiveUrl);
+                }
 
                 crawlResult.visitedCount++;
 
@@ -225,7 +230,9 @@ public class Crawler {
             sc.init(null, trustAllCerts, new SecureRandom());
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            System.err.println("Warning: failed to disable SSL verification — " + e.getMessage());
+        }
     }
 
     private void printProgress(String currentUrl, int visited, int matches) {
