@@ -14,6 +14,7 @@ public class CliOptions {
     private boolean allowExternal = false;
     private boolean insecure = false;
     private boolean allUrls = false;
+    private boolean dfs = false;
     private String output = "text";
     private int delayMs = 100;
     private boolean help = false;
@@ -68,6 +69,7 @@ public class CliOptions {
         options.allowExternal = params.containsKey("allow-external");
         options.insecure = params.containsKey("insecure");
         options.allUrls = params.containsKey("all-urls");
+        options.dfs = params.containsKey("dfs");
         options.output = params.getOrDefault("output", "text").toLowerCase();
 
         return options;
@@ -75,7 +77,7 @@ public class CliOptions {
 
     private static boolean isValuedFlag(String key) {
         if (key == null) return false;
-        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("all-urls") && !key.equals("help");
+        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("all-urls") && !key.equals("dfs") && !key.equals("help");
     }
 
     private static String mapShortFlag(char c) {
@@ -127,6 +129,7 @@ public class CliOptions {
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -a, --all-urls           Track every URL variant including query-string duplicates");
+        System.out.println("      --dfs                Use depth-first search instead of breadth-first search");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
@@ -144,6 +147,7 @@ public class CliOptions {
     public boolean isAllowExternal() { return allowExternal; }
     public boolean isInsecure() { return insecure; }
     public boolean isAllUrls() { return allUrls; }
+    public boolean isDfs() { return dfs; }
     public String getOutput() { return output; }
     public int getDelayMs() { return delayMs; }
     public boolean isHelp() { return help; }

@@ -129,6 +129,19 @@ public class MainTest {
         assertEquals(500, options.getDelayMs());
     }
 
+    @Test
+    public void testDfsOption() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--dfs"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertTrue(options.isDfs());
+
+        // off by default
+        String[] args2 = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options2 = CliOptions.parse(args2);
+        assertFalse(options2.isDfs());
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testDelayMsNegative() {
         String[] args = {"-u", "http://example.com", "-k", "test", "--delay-ms", "-1"};
