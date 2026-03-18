@@ -103,6 +103,25 @@ public class MainTest {
     }
 
     @Test
+    public void testNoQueryOption() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--no-query"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertTrue(options.isNoQuery());
+
+        // short flag
+        String[] args2 = {"-u", "http://example.com", "-k", "test", "-q"};
+        CliOptions options2 = CliOptions.parse(args2);
+        options2.validate();
+        assertTrue(options2.isNoQuery());
+
+        // off by default
+        String[] args3 = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options3 = CliOptions.parse(args3);
+        assertFalse(options3.isNoQuery());
+    }
+
+    @Test
     public void testDelayMsOption() {
         String[] args = {"-u", "http://example.com", "-k", "test", "--delay-ms", "500"};
         CliOptions options = CliOptions.parse(args);

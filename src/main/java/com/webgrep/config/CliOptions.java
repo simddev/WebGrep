@@ -13,6 +13,7 @@ public class CliOptions {
     private int timeoutMs = 20000;
     private boolean allowExternal = false;
     private boolean insecure = false;
+    private boolean noQuery = false;
     private String output = "text";
     private int delayMs = 100;
     private boolean help = false;
@@ -66,6 +67,7 @@ public class CliOptions {
         options.mode = params.getOrDefault("mode", "default").toLowerCase();
         options.allowExternal = params.containsKey("allow-external");
         options.insecure = params.containsKey("insecure");
+        options.noQuery = params.containsKey("no-query");
         options.output = params.getOrDefault("output", "text").toLowerCase();
 
         return options;
@@ -73,7 +75,7 @@ public class CliOptions {
 
     private static boolean isValuedFlag(String key) {
         if (key == null) return false;
-        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("help");
+        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("no-query") && !key.equals("help");
     }
 
     private static String mapShortFlag(char c) {
@@ -87,6 +89,7 @@ public class CliOptions {
             case 't' -> "timeout-ms";
             case 'e' -> "allow-external";
             case 'i' -> "insecure";
+            case 'q' -> "no-query";
             case 'o' -> "output";
             case 'r' -> "delay-ms";
             case 'h' -> "help";
@@ -123,6 +126,7 @@ public class CliOptions {
         System.out.println("  -b, --max-bytes <n>      Maximum file size in bytes (default: 10MB)");
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
+        System.out.println("  -q, --no-query           Deduplicate URLs by path only, ignoring query strings");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
@@ -139,6 +143,7 @@ public class CliOptions {
     public int getTimeoutMs() { return timeoutMs; }
     public boolean isAllowExternal() { return allowExternal; }
     public boolean isInsecure() { return insecure; }
+    public boolean isNoQuery() { return noQuery; }
     public String getOutput() { return output; }
     public int getDelayMs() { return delayMs; }
     public boolean isHelp() { return help; }
