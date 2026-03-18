@@ -20,6 +20,8 @@ import java.util.Map;
 public class Crawler {
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
     private static final int MAX_RETRIES = 3;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_TOO_MANY_REQUESTS = 429;
 
     private int spinnerIdx = 0;
     private final Map<String, String> cookieJar = new HashMap<>();
@@ -28,6 +30,7 @@ public class Crawler {
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
     private final String startDomain;
+    private final int maxBodySize;
     private final UrlDeduplicator dedup;
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
@@ -36,6 +39,7 @@ public class Crawler {
         this.matchEngine = matchEngine;
         String startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
         this.startDomain = startHost.startsWith("www.") ? startHost.substring(4) : startHost;
+        this.maxBodySize = (int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE);
         this.dedup = new UrlDeduplicator(options.isAllUrls());
 
         if (options.isInsecure()) {
@@ -141,7 +145,7 @@ public class Crawler {
                 }
 
             } catch (org.jsoup.HttpStatusException e) {
-                if (e.getStatusCode() == 403 || e.getStatusCode() == 429) {
+                if (e.getStatusCode() == HTTP_FORBIDDEN || e.getStatusCode() == HTTP_TOO_MANY_REQUESTS) {
                     crawlResult.addBlocked(current.url, "HTTP " + e.getStatusCode() + " (Access Denied/Rate Limited)");
                 } else {
                     crawlResult.addNetworkError("HTTP " + e.getStatusCode());
@@ -150,7 +154,7 @@ public class Crawler {
                 crawlResult.addNetworkError(e);
             }
 
-            int totalMatches = crawlResult.results.values().stream().mapToInt(Integer::intValue).sum();
+            int totalMatches = crawlResult.getTotalMatches();
             printProgress(current.url, crawlResult.visitedCount, totalMatches);
 
             if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
@@ -174,7 +178,7 @@ public class Crawler {
             try {
                 return Jsoup.connect(url)
                         .timeout(options.getTimeoutMs())
-                        .maxBodySize((int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE))
+                        .maxBodySize(maxBodySize)
                         .followRedirects(true)
                         .ignoreContentType(true)
                         .cookies(cookieJar)

@@ -28,6 +28,10 @@ public class CrawlResult {
         }
     }
 
+    public int getTotalMatches() {
+        return results.values().stream().mapToInt(Integer::intValue).sum();
+    }
+
     public void addMatch(String url, int count) {
         results.put(url, count);
     }
