@@ -29,7 +29,7 @@ java -jar WebGrep.jar --url <URL> --keyword <keyword> [options]
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-q, --no-query`: Deduplicate URLs by path only, ignoring query strings. Useful when a site serves the same page with different sort or filter parameters.
+- `-a, --all-urls`: Track every URL variant as a distinct page, including query-string duplicates (e.g. same page with different sort parameters). By default, URLs differing only by query string are deduplicated.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification (use with caution).
 - `-o, --output <format>`: Output format (`text` or `json`).

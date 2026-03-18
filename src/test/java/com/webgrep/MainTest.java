@@ -103,22 +103,22 @@ public class MainTest {
     }
 
     @Test
-    public void testNoQueryOption() {
-        String[] args = {"-u", "http://example.com", "-k", "test", "--no-query"};
+    public void testAllUrlsOption() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--all-urls"};
         CliOptions options = CliOptions.parse(args);
         options.validate();
-        assertTrue(options.isNoQuery());
+        assertTrue(options.isAllUrls());
 
         // short flag
-        String[] args2 = {"-u", "http://example.com", "-k", "test", "-q"};
+        String[] args2 = {"-u", "http://example.com", "-k", "test", "-a"};
         CliOptions options2 = CliOptions.parse(args2);
         options2.validate();
-        assertTrue(options2.isNoQuery());
+        assertTrue(options2.isAllUrls());
 
-        // off by default
+        // off by default (query dedup is the default)
         String[] args3 = {"-u", "http://example.com", "-k", "test"};
         CliOptions options3 = CliOptions.parse(args3);
-        assertFalse(options3.isNoQuery());
+        assertFalse(options3.isAllUrls());
     }
 
     @Test

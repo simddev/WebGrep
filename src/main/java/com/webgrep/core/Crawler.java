@@ -13,6 +13,9 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 
 public class Crawler {
+    private static final char[] SPINNER = {'|', '/', '-', '\\'};
+    private int spinnerIdx = 0;
+
     private final CliOptions options;
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
@@ -133,8 +136,12 @@ public class Crawler {
             } catch (Exception e) {
                 crawlResult.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
             }
+
+            int totalMatches = crawlResult.results.values().stream().mapToInt(Integer::intValue).sum();
+            printProgress(current.url, crawlResult.visitedCount, totalMatches);
         }
 
+        System.err.print("\r" + " ".repeat(100) + "\r");
         return crawlResult;
     }
 
@@ -155,9 +162,15 @@ public class Crawler {
     }
 
     private String dedupeKey(String url) {
-        if (!options.isNoQuery()) return url;
+        if (options.isAllUrls()) return url;
         int q = url.indexOf('?');
         return q != -1 ? url.substring(0, q) : url;
+    }
+
+    private void printProgress(String currentUrl, int visited, int matches) {
+        String truncated = currentUrl.length() > 60 ? currentUrl.substring(0, 57) + "..." : currentUrl;
+        System.err.printf("\r%c  %d pages visited  |  %d matches found  |  %s",
+                SPINNER[spinnerIdx++ % SPINNER.length], visited, matches, truncated);
     }
 
     private record UrlDepth(String url, int depth) {}
