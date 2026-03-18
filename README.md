@@ -112,6 +112,7 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
     "total_matches": 13,
     "pages_visited": 2,
     "pages_parsed": 2,
+    "docs_parsed": 0,
     "pages_blocked": 0,
     "errors": {
       "network_error": 0,
@@ -134,8 +135,10 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
 | Field | Meaning |
 |---|---|
 | `stats.duration_ms` | Wall-clock time for the entire crawl in milliseconds |
+| `stats.docs_parsed` | Number of binary documents (PDF, DOCX, etc.) parsed during the crawl |
 | `stopped_early` | Present only when `--max-hits` triggered an early exit; describes the limit that was reached |
 | `stats.errors.network_error` | Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
+| `stats.errors.network_error_reasons` | Breakdown of network errors by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
 | `stats.errors.blocked` | Server returned 403 or 429, or a bot-protection challenge was detected |
 | `stats.errors.skipped_size` | File exceeded `--max-bytes` and was not parsed |
 | `stats.errors.parse_error` | Reserved for future use |

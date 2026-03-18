@@ -94,12 +94,13 @@ public class Crawler {
 
                 if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
                     Document doc = response.parse();
-                    crawlResult.parsedCount++;
 
                     if (doc.title().contains("Just a moment...") || doc.text().contains("Enable JavaScript and cookies to continue")) {
                         crawlResult.addBlocked(current.url, "Cloudflare/Bot protection challenge");
+                        continue;
                     }
 
+                    crawlResult.parsedCount++;
                     content = extractor.extractTextFromHtml(doc);
                     if (current.depth < options.getDepth()) {
                         links = extractor.extractLinks(doc, body, current.url);
@@ -139,7 +140,7 @@ public class Crawler {
                 if (e.getStatusCode() == 403 || e.getStatusCode() == 429) {
                     crawlResult.addBlocked(current.url, "HTTP " + e.getStatusCode() + " (Access Denied/Rate Limited)");
                 } else {
-                    crawlResult.incrementError(CrawlResult.ErrorType.NETWORK_ERROR);
+                    crawlResult.addNetworkError("HTTP " + e.getStatusCode());
                 }
             } catch (Exception e) {
                 crawlResult.addNetworkError(e);

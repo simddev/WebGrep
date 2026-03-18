@@ -46,6 +46,11 @@ public class CrawlResult {
         networkErrorReasons.merge(classifyException(e), 1, Integer::sum);
     }
 
+    public void addNetworkError(String reason) {
+        incrementError(ErrorType.NETWORK_ERROR);
+        networkErrorReasons.merge(reason, 1, Integer::sum);
+    }
+
     private String classifyException(Exception e) {
         return switch (e.getClass().getSimpleName()) {
             case "SocketTimeoutException"               -> "Timeout";
