@@ -88,6 +88,7 @@ public class ReportWriter {
         json.append("    \"total_matches\": ").append(crawlResult.results.values().stream().mapToInt(Integer::intValue).sum()).append(",\n");
         json.append("    \"pages_visited\": ").append(crawlResult.visitedCount).append(",\n");
         json.append("    \"pages_parsed\": ").append(crawlResult.parsedCount).append(",\n");
+        json.append("    \"docs_parsed\": ").append(crawlResult.docsCount).append(",\n");
         json.append("    \"pages_blocked\": ").append(crawlResult.blockedUrls.size()).append(",\n");
         json.append("    \"errors\": {\n");
         CrawlResult.ErrorType[] types = CrawlResult.ErrorType.values();
@@ -96,7 +97,18 @@ public class ReportWriter {
             if (i < types.length - 1) json.append(",");
             json.append("\n");
         }
-        json.append("    }\n");
+        json.append("    }");
+        if (!crawlResult.networkErrorReasons.isEmpty()) {
+            json.append(",\n    \"network_error_reasons\": {\n");
+            List<Map.Entry<String, Integer>> reasons = new ArrayList<>(crawlResult.networkErrorReasons.entrySet());
+            for (int i = 0; i < reasons.size(); i++) {
+                json.append("      \"").append(escapeJson(reasons.get(i).getKey())).append("\": ").append(reasons.get(i).getValue());
+                if (i < reasons.size() - 1) json.append(",");
+                json.append("\n");
+            }
+            json.append("    }");
+        }
+        json.append("\n");
         json.append("  },\n");
         if (crawlResult.stoppedAtMaxHits > 0) {
             json.append("  \"stopped_early\": \"max-hits limit of ").append(crawlResult.stoppedAtMaxHits).append(" reached\",\n");
