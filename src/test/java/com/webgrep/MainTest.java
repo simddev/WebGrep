@@ -149,6 +149,32 @@ public class MainTest {
     }
 
     @Test
+    public void testMaxHitsOption() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--max-hits", "5"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals(5, options.getMaxHits());
+
+        // short flag
+        String[] args2 = {"-u", "http://example.com", "-k", "test", "-n", "10"};
+        CliOptions options2 = CliOptions.parse(args2);
+        options2.validate();
+        assertEquals(10, options2.getMaxHits());
+
+        // default is 0 (no limit)
+        String[] args3 = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options3 = CliOptions.parse(args3);
+        assertEquals(0, options3.getMaxHits());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testMaxHitsNegative() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--max-hits", "-1"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
     public void testCrawlResultDuration() {
         CrawlResult result = new CrawlResult();
         assertEquals(0L, result.durationMs);
