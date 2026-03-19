@@ -179,7 +179,7 @@ public class Crawler {
             }
         }
 
-        System.err.print("\r" + " ".repeat(120) + "\r");
+        System.err.print("\r" + " ".repeat(110) + "\r");
         return crawlResult;
     }
 
@@ -239,7 +239,7 @@ public class Crawler {
         String truncated = currentUrl.length() > 60 ? currentUrl.substring(0, 57) + "..." : currentUrl;
         String line = String.format("%c  %d pages visited  |  %d matches found  |  %s",
                 SPINNER[spinnerIdx++ % SPINNER.length], visited, matches, truncated);
-        System.err.printf("\r%-120s", line);
+        System.err.printf("\r%-110s", line);
     }
 
     private record UrlDepth(String url, int depth) {}
