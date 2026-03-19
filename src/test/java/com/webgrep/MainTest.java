@@ -18,6 +18,22 @@ public class MainTest {
     }
 
     @Test
+    public void testNonHttpSchemesFilteredByNormalizeUrl() {
+        // ftp:// and file:// must be rejected so they never reach the fetcher
+        assertEquals("", UrlUtils.normalizeUrl("ftp://example.com/file.txt", null));
+        assertEquals("", UrlUtils.normalizeUrl("file:///etc/passwd", null));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testNonHttpSchemeInUrlOptionIsRejected() {
+        // Passing ftp:// as the seed URL should fail validation with a clear message,
+        // not silently produce 0 pages visited.
+        String[] args = {"-u", "ftp://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
     public void testMatchEngine() {
         MatchEngine engine = new MatchEngine();
 

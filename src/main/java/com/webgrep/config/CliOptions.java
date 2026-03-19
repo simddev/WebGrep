@@ -106,6 +106,8 @@ public class CliOptions {
     public void validate() {
         if (help) return;
         if (url == null || url.isEmpty()) throw new IllegalArgumentException("URL is required (-u, --url)");
+        if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") && !url.startsWith("http://") && !url.startsWith("https://"))
+            throw new IllegalArgumentException("URL scheme must be http or https");
         if (keyword == null || keyword.isEmpty()) throw new IllegalArgumentException("Keyword is required (-k, --keyword)");
         if (depth < 0) throw new IllegalArgumentException("Depth must be non-negative");
         if (maxPages <= 0) throw new IllegalArgumentException("Max pages must be greater than zero");
