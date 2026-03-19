@@ -1,10 +1,10 @@
 # WebGrep
 
-![WebGrep demo](images/demo.gif)
-
 WebGrep is a high-performance CLI crawler and keyword search tool. It searches for keywords across websites and automatically parses binary documents — including **PDF, DOCX, TXT, and many other file formats** — discovered during the crawl, using Apache Tika for text extraction.
 
 **Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), JUnit 4 (tests).
+
+![WebGrep demo](images/demo.gif)
 
 ### Architecture
 WebGrep is designed with a modular architecture for high performance and maintainability:
