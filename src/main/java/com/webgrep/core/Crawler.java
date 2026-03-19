@@ -205,7 +205,7 @@ public class Crawler {
             } catch (org.jsoup.HttpStatusException e) {
                 if (e.getStatusCode() == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
                     long waitMs = 1000L << attempt; // 2s, 4s
-                    System.err.printf("\r%-120s",
+                    System.err.printf("\r%-110s",
                             "  ⏸  Rate limited — waiting " + (waitMs / 1000) + "s before retry "
                             + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + url);
                     Thread.sleep(waitMs);
