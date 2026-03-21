@@ -160,6 +160,6 @@ Produces `target/WebGrep-1.0.0.jar` — a self-contained fat JAR with all depend
 
 ---
 
-Written by and belongs to Simon D.
-Free to use for personal and educational purposes.
-For commercial use please contact me at simon.d.dev@proton.me.
+Written by and belongs to Simon D.  
+Free to use for personal and educational purposes.  
+For commercial use please contact me at simon.d.dev@proton.me.  
