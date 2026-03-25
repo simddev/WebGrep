@@ -150,8 +150,11 @@ public class CliOptions {
     }
 
     public static void printHelp() {
-        System.out.println("WebGrep - A high-performance web crawler and keyword searcher");
-        System.out.println("\nUsage: java -jar WebGrep.jar -u <URL> -k <keyword> [options]");
+        System.out.println("WebGrep - Keyword search across websites, local files, and folders");
+        System.out.println("\nUsage: java -jar WebGrep.jar <-u URL | -f path | -F path> -k <keyword> [options]");
+        System.out.println("  -u <URL>   -k <keyword> [options]   web crawl mode");
+        System.out.println("  -f <path>  -k <keyword> [options]   local file mode");
+        System.out.println("  -F <path>  -k <keyword> [options]   local folder mode");
         System.out.println("\nOptions:");
         System.out.println("  -u, --url <URL>          The starting URL (required, unless --file or --folder is used)");
         System.out.println("  -f, --file <path>        Search a local file instead of crawling the web");

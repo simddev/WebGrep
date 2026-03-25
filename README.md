@@ -1,6 +1,6 @@
 # WebGrep
 
-WebGrep is a high-performance CLI crawler and keyword search tool. It searches for keywords across websites and automatically parses binary documents — including **PDF, DOCX, TXT, and many other file formats** — discovered during the crawl, using Apache Tika for text extraction.
+WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes support Apache Tika text extraction from **PDF, DOCX, TXT, and 100+ other formats**, and report exact page and line numbers for every match.
 
 **Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), JUnit 4 (tests).
 
@@ -143,15 +143,17 @@ java -jar WebGrep.jar -F /path/to/documents -k "confidential" -o json
 ```
 
 ### Document Support
-WebGrep automatically detects and extracts text from any linked document using Apache Tika. Supported formats include:
+All three input modes use Apache Tika for text extraction. Supported formats include:
 - **PDF** (`.pdf`)
 - **Word** (`.doc`, `.docx`)
 - **Plain text** (`.txt`)
-- **And many more** — Tika supports 100+ formats including ODT, RTF, EPUB, XLS, XLSX, PPT, PPTX, and more. Any file whose link passes the URL filter will be parsed.
+- **And many more** — Tika supports 100+ formats including ODT, RTF, EPUB, XLS, XLSX, PPT, PPTX, and more.
 
-Each binary document is parsed with a **30-second timeout**. If parsing takes longer (e.g. a corrupt or malformed file), it is skipped and the raw bytes are used as a fallback.
+Each document is parsed with a **30-second timeout** per file. If parsing takes longer (e.g. a corrupt or malformed file), it is skipped and the raw bytes are used as a UTF-8 fallback.
 
-Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives, social share links) are filtered by URL before any request is made.
+**Web crawl mode:** only files whose URL passes the link filter are fetched — static assets (images, video, CSS, JS, fonts, archives, social share links) are skipped before any request is made.
+
+**File and folder modes:** every file in the given path is passed to Tika regardless of extension. Files exceeding `--max-bytes` are skipped and counted in the summary.
 
 ### Sample Output (JSON)
 
