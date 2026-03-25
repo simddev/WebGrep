@@ -7,6 +7,8 @@ import com.webgrep.core.MatchEngine;
 import com.webgrep.reporting.CrawlResult;
 import com.webgrep.reporting.ReportWriter;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
@@ -32,13 +34,18 @@ public class Main {
 
             ContentExtractor extractor = new ContentExtractor(options.getMaxBytes());
             MatchEngine matchEngine = new MatchEngine();
-            Crawler crawler = new Crawler(options, extractor, matchEngine);
-
+            ReportWriter reportWriter = new ReportWriter();
             long startTime = System.currentTimeMillis();
-            CrawlResult result = crawler.crawl();
+            CrawlResult result;
+
+            if (options.getFile() != null) {
+                result = scanLocalFile(options, extractor, matchEngine);
+            } else {
+                Crawler crawler = new Crawler(options, extractor, matchEngine);
+                result = crawler.crawl();
+            }
             result.durationMs = System.currentTimeMillis() - startTime;
 
-            ReportWriter reportWriter = new ReportWriter();
             if ("json".equals(options.getOutput())) {
                 reportWriter.printJsonOutput(result, options);
             } else {
@@ -60,6 +67,24 @@ public class Main {
             }
             System.exit(2);
         }
+    }
+
+    private static CrawlResult scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
+            throws Exception {
+        File f = new File(options.getFile());
+        if (!f.exists() || !f.isFile())
+            throw new IllegalArgumentException("File not found: " + options.getFile());
+
+        byte[] bytes = Files.readAllBytes(f.toPath());
+        String text = extractor.extractTextFromBinary(bytes, f.getName(), null);
+        int count = matchEngine.countMatches(text, options.getKeyword(), options.getMode());
+
+        CrawlResult result = new CrawlResult();
+        result.visitedCount = 1;
+        result.parsedCount = 1;
+        result.docsCount = 1;
+        if (count > 0) result.addMatch(f.getAbsolutePath(), count);
+        return result;
     }
 
     private static void setupLogging() {
