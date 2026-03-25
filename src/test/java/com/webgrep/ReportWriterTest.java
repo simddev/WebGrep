@@ -2,6 +2,7 @@ package com.webgrep;
 
 import com.webgrep.config.CliOptions;
 import com.webgrep.reporting.CrawlResult;
+import com.webgrep.reporting.FileMatch;
 import com.webgrep.reporting.ReportWriter;
 import org.junit.After;
 import org.junit.Before;
@@ -9,6 +10,9 @@ import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.*;
 
@@ -111,5 +115,184 @@ public class ReportWriterTest {
         String json = out.toString();
         assertFalse(json.contains("line1\nline2"));
         assertTrue(json.contains("line1\\nline2"));
+    }
+
+    // ── regression: web crawl JSON must still have url + depth ────────────────
+
+    @Test
+    public void testWebCrawlJsonOutputHasUrlAndDepthFields() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "-d", "3"};
+        CliOptions options = CliOptions.parse(args);
+        new ReportWriter().printJsonOutput(new CrawlResult(), options);
+        String json = out.toString();
+        assertTrue(json.contains("\"url\": \"http://example.com\""));
+        assertTrue(json.contains("\"depth\": 3"));
+        assertFalse("File field must not appear in web crawl JSON", json.contains("\"file\""));
+    }
+
+    @Test
+    public void testWebCrawlJsonOutputDefaultDepthIsOne() {
+        CliOptions options = CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "x"});
+        new ReportWriter().printJsonOutput(new CrawlResult(), options);
+        assertTrue(out.toString().contains("\"depth\": 1"));
+    }
+
+    // ── file mode text output ─────────────────────────────────────────────────
+
+    private CliOptions fileOpts(String file, String keyword) {
+        return CliOptions.parse(new String[]{"-f", file, "-k", keyword});
+    }
+
+    @Test
+    public void testFileTextOutputNoMatches() {
+        new ReportWriter().printFileTextOutput(
+                fileOpts("/tmp/doc.txt", "fox"), Collections.emptyList(), 100);
+        String output = out.toString();
+        assertTrue(output.contains("--- WebGrep Results ---"));
+        assertTrue(output.contains("File: /tmp/doc.txt"));
+        assertTrue(output.contains("Total matches found: 0"));
+        assertFalse("'Matches:' section must not appear when there are no matches",
+                output.contains("Matches:"));
+    }
+
+    @Test
+    public void testFileTextOutputWithMatchesNoPages() {
+        List<FileMatch> matches = Arrays.asList(
+                new FileMatch(0, 3, 1, "The quick brown fox"),
+                new FileMatch(0, 7, 2, "fox and fox here")
+        );
+        new ReportWriter().printFileTextOutput(fileOpts("/tmp/doc.txt", "fox"), matches, 50);
+        String output = out.toString();
+
+        assertTrue(output.contains("Total matches found: 3")); // 1+2
+        assertTrue(output.contains("Matches:"));
+        assertTrue(output.contains("l.3"));
+        assertTrue(output.contains("l.7"));
+        assertTrue(output.contains("(1 match)"));
+        assertTrue(output.contains("(2 matches)"));
+        assertTrue(output.contains("The quick brown fox"));
+        assertFalse("Page column must not appear when page=0", output.contains("p."));
+    }
+
+    @Test
+    public void testFileTextOutputWithPageNumbers() {
+        List<FileMatch> matches = Arrays.asList(
+                new FileMatch(1, 3, 1, "fox on page one"),
+                new FileMatch(3, 5, 2, "fox on page three")
+        );
+        new ReportWriter().printFileTextOutput(fileOpts("/tmp/doc.pdf", "fox"), matches, 200);
+        String output = out.toString();
+        assertTrue(output.contains("p.1, l.3"));
+        assertTrue(output.contains("p.3, l.5"));
+    }
+
+    @Test
+    public void testFileTextOutputAnyPageNonZeroTriggersPageFormat() {
+        // Even if the first match has page=0, a later match with page>0 switches the format
+        List<FileMatch> matches = Arrays.asList(
+                new FileMatch(0, 1, 1, "first"),
+                new FileMatch(2, 4, 1, "second")
+        );
+        new ReportWriter().printFileTextOutput(fileOpts("/tmp/f.pdf", "x"), matches, 10);
+        assertTrue(out.toString().contains("p.2, l.4"));
+    }
+
+    @Test
+    public void testFileTextOutputDurationSeconds() {
+        new ReportWriter().printFileTextOutput(
+                fileOpts("/tmp/f.txt", "x"), Collections.emptyList(), 1500);
+        assertTrue(out.toString().contains("Duration: 1.50s"));
+    }
+
+    @Test
+    public void testFileTextOutputDurationMinutes() {
+        new ReportWriter().printFileTextOutput(
+                fileOpts("/tmp/f.txt", "x"), Collections.emptyList(), 90_000);
+        String output = out.toString();
+        assertTrue(output.contains("1m"));
+        assertTrue(output.contains("30.00s"));
+    }
+
+    @Test
+    public void testFileTextOutputDoesNotPrintWebCrawlFields() {
+        List<FileMatch> matches = List.of(new FileMatch(0, 1, 1, "match"));
+        new ReportWriter().printFileTextOutput(fileOpts("/tmp/f.txt", "x"), matches, 100);
+        String output = out.toString();
+        assertFalse("Web crawl 'Pages visited' must not appear in file mode", output.contains("Pages visited"));
+        assertFalse("Web crawl 'HTML pages' must not appear in file mode", output.contains("HTML pages"));
+    }
+
+    // ── file mode JSON output ─────────────────────────────────────────────────
+
+    @Test
+    public void testFileJsonOutputStructure() {
+        List<FileMatch> matches = List.of(new FileMatch(0, 5, 2, "keyword here"));
+        new ReportWriter().printFileJsonOutput(
+                fileOpts("/tmp/test.pdf", "keyword"), matches, 123);
+        String json = out.toString();
+
+        assertTrue(json.contains("\"file\": \"/tmp/test.pdf\""));
+        assertTrue(json.contains("\"keyword\": \"keyword\""));
+        assertTrue(json.contains("\"duration_ms\": 123"));
+        assertTrue(json.contains("\"total_matches\": 2"));
+        assertTrue(json.contains("\"matches\":"));
+        assertTrue(json.contains("\"line\": 5"));
+        assertTrue(json.contains("\"count\": 2"));
+        assertTrue(json.contains("\"snippet\": \"keyword here\""));
+    }
+
+    @Test
+    public void testFileJsonOutputHasNoUrlOrDepthFields() {
+        new ReportWriter().printFileJsonOutput(
+                fileOpts("/tmp/t.pdf", "x"), Collections.emptyList(), 50);
+        String json = out.toString();
+        assertFalse("url field must not appear in file-mode JSON", json.contains("\"url\""));
+        assertFalse("depth field must not appear in file-mode JSON", json.contains("\"depth\""));
+    }
+
+    @Test
+    public void testFileJsonOutputOmitsPageFieldWhenNoPageStructure() {
+        List<FileMatch> matches = List.of(new FileMatch(0, 3, 1, "snippet"));
+        new ReportWriter().printFileJsonOutput(fileOpts("/tmp/t.txt", "x"), matches, 50);
+        assertFalse(out.toString().contains("\"page\""));
+    }
+
+    @Test
+    public void testFileJsonOutputIncludesPageFieldWhenPresent() {
+        List<FileMatch> matches = Arrays.asList(
+                new FileMatch(1, 2, 1, "p1 line"),
+                new FileMatch(2, 4, 1, "p2 line")
+        );
+        new ReportWriter().printFileJsonOutput(fileOpts("/tmp/t.pdf", "x"), matches, 50);
+        String json = out.toString();
+        assertTrue(json.contains("\"page\": 1"));
+        assertTrue(json.contains("\"page\": 2"));
+    }
+
+    @Test
+    public void testFileJsonOutputEmptyMatchesArrayIsValid() {
+        new ReportWriter().printFileJsonOutput(
+                fileOpts("/tmp/t.txt", "notfound"), Collections.emptyList(), 50);
+        String json = out.toString();
+        assertTrue(json.contains("\"total_matches\": 0"));
+        assertTrue(json.contains("\"matches\":"));
+    }
+
+    @Test
+    public void testFileJsonOutputEscapesQuotesInSnippet() {
+        List<FileMatch> matches = List.of(new FileMatch(0, 1, 1, "fox said \"hello\""));
+        new ReportWriter().printFileJsonOutput(fileOpts("/tmp/t.txt", "fox"), matches, 50);
+        assertTrue(out.toString().contains("\\\"hello\\\""));
+    }
+
+    @Test
+    public void testFileJsonOutputTotalMatchesSumsAllLines() {
+        List<FileMatch> matches = Arrays.asList(
+                new FileMatch(0, 1, 3, "line with three"),
+                new FileMatch(0, 2, 2, "line with two"),
+                new FileMatch(0, 3, 1, "line with one")
+        );
+        new ReportWriter().printFileJsonOutput(fileOpts("/tmp/t.txt", "x"), matches, 50);
+        assertTrue(out.toString().contains("\"total_matches\": 6"));
     }
 }
