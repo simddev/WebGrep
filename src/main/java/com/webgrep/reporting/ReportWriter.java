@@ -6,6 +6,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Formats and prints WebGrep results to {@code stdout}.
+ *
+ * <p>Supports three output modes, each with two format variants:
+ * <ul>
+ *   <li><b>Web crawl</b> — {@link #printTextOutput} / {@link #printJsonOutput}</li>
+ *   <li><b>Single file</b> — {@link #printFileTextOutput} / {@link #printFileJsonOutput}</li>
+ *   <li><b>Folder scan</b> — {@link #printFolderTextOutput} / {@link #printFolderJsonOutput}</li>
+ * </ul>
+ *
+ * <p>Text output is formatted for direct human reading; JSON output is minified by field
+ * but line-separated for readability, suitable for piping to {@code jq} or other tools.
+ * All string values in JSON are escaped via {@link #escapeJson(String)}.
+ */
 public class ReportWriter {
 
     public void printTextOutput(CrawlResult crawlResult) {
@@ -73,12 +87,8 @@ public class ReportWriter {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
         json.append("  \"query\": {\n");
-        if (options.getFile() != null) {
-            json.append("    \"file\": \"").append(escapeJson(options.getFile())).append("\",\n");
-        } else {
-            json.append("    \"url\": \"").append(escapeJson(options.getUrl())).append("\",\n");
-            json.append("    \"depth\": ").append(options.getDepth()).append(",\n");
-        }
+        json.append("    \"url\": \"").append(escapeJson(options.getUrl())).append("\",\n");
+        json.append("    \"depth\": ").append(options.getDepth()).append(",\n");
         json.append("    \"keyword\": \"").append(escapeJson(options.getKeyword())).append("\",\n");
         json.append("    \"mode\": \"").append(escapeJson(options.getMode())).append("\"\n");
         json.append("  },\n");

@@ -17,6 +17,25 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Crawls a website starting from a seed URL and searches every visited page for a keyword.
+ *
+ * <p>The crawler supports both breadth-first (default) and depth-first traversal, configurable
+ * politeness delays, per-request body size limits, and automatic retry with exponential backoff
+ * on HTTP 429 (Too Many Requests) responses. A session cookie jar is maintained across all
+ * requests so that pages that set cookies (e.g. for session management) remain accessible.
+ *
+ * <p>Domain scoping rules:
+ * <ul>
+ *   <li>If the seed URL starts with {@code www.}, all subdomains of the root domain are followed
+ *       (e.g. seed {@code www.example.com} also follows {@code docs.example.com}).</li>
+ *   <li>Otherwise, only the exact domain and its {@code www.} alias are followed.</li>
+ *   <li>Use {@code --allow-external} to disable domain scoping entirely.</li>
+ * </ul>
+ *
+ * <p>HTML pages are parsed with Jsoup; all other content types are passed to
+ * {@link ContentExtractor} for binary extraction via Apache Tika.
+ */
 public class Crawler {
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
     private static final int MAX_RETRIES = 3;

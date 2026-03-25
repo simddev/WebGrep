@@ -4,6 +4,23 @@ import java.text.Normalizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Counts keyword occurrences in a string using one of three pluggable matching strategies.
+ *
+ * <ul>
+ *   <li><b>default</b> — Case-insensitive with Unicode and diacritic support. {@code cafe}
+ *       matches {@code Café}, {@code CAFE}, {@code café}. If no match is found via regex, a
+ *       simplified (diacritic-stripped, punctuation-removed) fallback pass is attempted.</li>
+ *   <li><b>exact</b> — Strict case-sensitive literal match. {@code hello} does not match
+ *       {@code Hello}.</li>
+ *   <li><b>fuzzy</b> — First tries a normalised substring match; if that fails, splits the
+ *       text into words and accepts any word within Levenshtein edit distance 1 (for keywords
+ *       ≤ 4 characters) or 2 (longer keywords). Catches common typos and spelling variants.</li>
+ * </ul>
+ *
+ * <p>Compiled {@link java.util.regex.Pattern} objects are cached for the most recently used
+ * keyword/mode pair to avoid recompilation on repeated calls from a scan loop.
+ */
 public class MatchEngine {
 
     private String cachedKeyword;

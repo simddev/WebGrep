@@ -108,7 +108,7 @@ public class Main {
                 continue;
             }
             scanned++;
-            System.err.printf("\r  Scanning (%d/%d): %-80s", scanned, files.size() - skipped, path.getFileName());
+            System.err.printf("\r  Scanning (%d/%d): %-80s", scanned + skipped, files.size(), path.getFileName());
             try {
                 byte[] bytes = Files.readAllBytes(path);
                 String text = extractor.extractTextFromBinary(bytes, path.getFileName().toString(), null);

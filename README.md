@@ -8,11 +8,11 @@ WebGrep is a high-performance CLI crawler and keyword search tool. It searches f
 
 ### Architecture
 WebGrep is designed with a modular architecture for high performance and maintainability:
-- **CliOptions**: Handles advanced argument parsing and strict input validation.
+- **CliOptions**: Handles advanced argument parsing and strict input validation. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
 - **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays. Maintains a session cookie jar across all requests, and automatically retries on HTTP 429 (rate limited) with exponential backoff before giving up. Displays a live progress indicator during the crawl.
 - **ContentExtractor**: Orchestrates intelligent text extraction from HTML pages (via Jsoup) and binary documents like PDF/DOCX (via Apache Tika), with a 30-second timeout per document to prevent hangs on corrupt or oversized files.
 - **MatchEngine**: Executes pluggable matching strategies including case-insensitive, exact, and fuzzy (Levenshtein) searches with full Unicode and diacritic support. Regex patterns are cached per run for performance.
-- **ReportWriter**: Generates human-readable text summaries or structured JSON for automation.
+- **ReportWriter**: Generates human-readable text summaries or structured JSON for automation. Covers all three input modes (web crawl, single file, folder scan).
 
 ### Depth Definition
 - **Depth 0**: Fetches and searches only the provided seed URL. No links are followed.
@@ -22,17 +22,33 @@ WebGrep is designed with a modular architecture for high performance and maintai
 Each URL is visited at most once per run. By default, URLs that look like navigation variants of an already-visited page are skipped: if `list?id=1` was visited, then `list?id=1&sort=asc` is treated as a variant and skipped — but `list?id=2` has a different value and is treated as new content. Use `--all-urls` to disable this.
 
 ### Usage
+WebGrep has three input modes. Exactly one must be specified:
+
 ```bash
+# Web crawl mode
 java -jar WebGrep.jar -u <URL> -k <keyword> [options]
+
+# Local file mode
+java -jar WebGrep.jar -f <path> -k <keyword> [options]
+
+# Local folder mode
+java -jar WebGrep.jar -F <path> -k <keyword> [options]
 ```
 
 #### Options:
-- `-u, --url <URL>`: The starting URL (required).
+
+**Input (exactly one required):**
+- `-u, --url <URL>`: The starting URL for a web crawl.
+- `-f, --file <path>`: Search a single local file instead of crawling the web. Supports all formats that Apache Tika understands (PDF, DOCX, TXT, and more).
+- `-F, --folder <path>`: Recursively search all files in a local directory. Each file is scanned independently; results are grouped by file.
+
+**Matching:**
 - `-k, --keyword <word>`: The keyword to search for (required).
-- `-d, --depth <n>`: Maximum crawl depth (default: 1).
 - `-m, --mode <mode>`: Match strategy (`default`, `exact`, `fuzzy`).
+
+**Web crawl controls:**
+- `-d, --depth <n>`: Maximum crawl depth (default: 1).
 - `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000).
-- `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
 - `-n, --max-hits <n>`: Stop crawling as soon as n total matches have been found (default: 0 = no limit). Pairs well with `--dfs` to surface deeply buried results quickly, or with BFS (default) to find the first N most prominent matches.
@@ -40,6 +56,9 @@ java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 - `-s, --dfs`: Use depth-first search instead of the default breadth-first search. BFS explores the site level by level (all pages at depth 1 before depth 2); DFS follows each link chain as deep as possible before backtracking. DFS can find deeply buried documents faster; BFS gives more representative coverage of the whole site.
 - `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification. Use with caution — this bypasses all TLS validation.
+
+**General:**
+- `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to both web downloads and local files.
 - `-o, --output <format>`: Output format (`text` or `json`).
 - `-h, --help`: Show help message.
 
@@ -49,6 +68,8 @@ java -jar WebGrep.jar -u <URL> -k <keyword> [options]
 - **Fuzzy**: First tries a normalized (diacritic-stripped, punctuation-removed) substring match. If nothing is found, splits the text into words and accepts any word within a Levenshtein edit distance of 1 (for keywords of 4 characters or fewer) or 2 (for longer keywords). This catches common typos and minor spelling variations.
 
 ### Examples
+
+#### Web Crawl
 **Basic search:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k domain
@@ -89,6 +110,38 @@ java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2 -n 5
 java -jar WebGrep.jar -u https://example.com -k "annual report" -d 3 -s -n 5
 ```
 
+#### Local File
+**Search a plain text or PDF file:**
+```bash
+java -jar WebGrep.jar -f /path/to/report.pdf -k "revenue"
+```
+
+**Case-sensitive search in a DOCX file:**
+```bash
+java -jar WebGrep.jar -f /path/to/contract.docx -k "Clause 4.2" -m exact
+```
+
+**JSON output from a local file:**
+```bash
+java -jar WebGrep.jar -f /path/to/report.pdf -k "revenue" -o json
+```
+
+#### Local Folder
+**Search all files in a folder recursively:**
+```bash
+java -jar WebGrep.jar -F /path/to/documents -k "confidential"
+```
+
+**Search with a file size limit (skip files larger than 5 MB):**
+```bash
+java -jar WebGrep.jar -F /path/to/documents -k "invoice" -b 5242880
+```
+
+**JSON output from a folder scan:**
+```bash
+java -jar WebGrep.jar -F /path/to/documents -k "confidential" -o json
+```
+
 ### Document Support
 WebGrep automatically detects and extracts text from any linked document using Apache Tika. Supported formats include:
 - **PDF** (`.pdf`)
@@ -101,12 +154,14 @@ Each binary document is parsed with a **30-second timeout**. If parsing takes lo
 Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives, social share links) are filtered by URL before any request is made.
 
 ### Sample Output (JSON)
+
+#### Web Crawl
 ```json
 {
   "query": {
     "url": "https://example.com",
-    "keyword": "domain",
     "depth": 1,
+    "keyword": "domain",
     "mode": "default"
   },
   "stats": {
@@ -127,7 +182,62 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
   "results": [
     { "url": "https://example.com/", "count": 13 }
   ],
-  "blocked": [
+  "blocked": []
+}
+```
+
+#### Local File
+```json
+{
+  "query": {
+    "file": "/path/to/report.pdf",
+    "keyword": "revenue",
+    "mode": "default"
+  },
+  "stats": {
+    "duration_ms": 84,
+    "total_matches": 3
+  },
+  "matches": [
+    { "page": 1, "line": 4,  "count": 1, "snippet": "Total revenue for the year was $4.2M" },
+    { "page": 2, "line": 11, "count": 2, "snippet": "Revenue growth and revenue targets exceeded" }
+  ]
+}
+```
+
+> For plain text files (no page structure), the `page` field is omitted from each match object.
+
+#### Local Folder
+```json
+{
+  "query": {
+    "folder": "/path/to/documents",
+    "keyword": "confidential",
+    "mode": "default"
+  },
+  "stats": {
+    "duration_ms": 312,
+    "files_scanned": 5,
+    "files_skipped": 1,
+    "files_with_matches": 2,
+    "total_matches": 4
+  },
+  "results": [
+    {
+      "file": "/path/to/documents/contract.docx",
+      "total_matches": 3,
+      "matches": [
+        { "line": 2, "count": 1, "snippet": "CONFIDENTIAL — Do not distribute" },
+        { "line": 17, "count": 2, "snippet": "This document is confidential and confidential use only" }
+      ]
+    },
+    {
+      "file": "/path/to/documents/notes.txt",
+      "total_matches": 1,
+      "matches": [
+        { "line": 5, "count": 1, "snippet": "Mark as confidential before sending" }
+      ]
+    }
   ]
 }
 ```
@@ -135,15 +245,20 @@ Files that are never fetched or parsed (images, video, CSS, JS, fonts, archives,
 #### JSON Fields Reference
 | Field | Meaning |
 |---|---|
-| `stats.duration_ms` | Wall-clock time for the entire crawl in milliseconds |
-| `stats.docs_parsed` | Number of binary documents (PDF, DOCX, etc.) parsed during the crawl |
-| `stopped_early` | Present only when `--max-hits` triggered an early exit; describes the limit that was reached |
-| `stats.errors.network_error` | Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
-| `stats.errors.network_error_reasons` | Breakdown of network errors by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
-| `stats.errors.blocked` | Server returned 403 or 429, or a bot-protection challenge was detected |
-| `stats.errors.skipped_size` | File exceeded `--max-bytes` and was not parsed |
+| `stats.duration_ms` | Wall-clock time for the entire run in milliseconds |
+| `stats.docs_parsed` | *(web crawl)* Number of binary documents (PDF, DOCX, etc.) parsed during the crawl |
+| `stopped_early` | *(web crawl)* Present only when `--max-hits` triggered an early exit; describes the limit reached |
+| `stats.errors.network_error` | *(web crawl)* Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
+| `stats.errors.network_error_reasons` | *(web crawl)* Breakdown of network errors by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
+| `stats.errors.blocked` | *(web crawl)* Server returned 403 or 429, or a bot-protection challenge was detected |
+| `stats.errors.skipped_size` | *(web crawl)* File exceeded `--max-bytes` and was not parsed |
 | `stats.errors.parse_error` | Reserved for future use |
 | `stats.errors.skipped_type` | Reserved for future use |
+| `stats.files_skipped` | *(folder)* Files that exceeded `--max-bytes` and were not scanned |
+| `matches[].page` | *(file/folder)* Page number (1-based); omitted for plain-text files with no page structure |
+| `matches[].line` | *(file/folder)* Line number within the page (1-based) |
+| `matches[].count` | *(file/folder)* Number of keyword occurrences on that line |
+| `matches[].snippet` | *(file/folder)* Trimmed line content, truncated to 120 characters |
 
 ### Limitations
 - **JavaScript**: WebGrep processes static HTML only. It does not execute JavaScript. Pages that render content client-side (SPAs) may not be fully indexed.
