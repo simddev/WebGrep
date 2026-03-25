@@ -5,10 +5,13 @@ import com.webgrep.core.ContentExtractor;
 import com.webgrep.core.Crawler;
 import com.webgrep.core.MatchEngine;
 import com.webgrep.reporting.CrawlResult;
+import com.webgrep.reporting.FileMatch;
 import com.webgrep.reporting.ReportWriter;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
@@ -36,20 +39,24 @@ public class Main {
             MatchEngine matchEngine = new MatchEngine();
             ReportWriter reportWriter = new ReportWriter();
             long startTime = System.currentTimeMillis();
-            CrawlResult result;
 
             if (options.getFile() != null) {
-                result = scanLocalFile(options, extractor, matchEngine);
+                List<FileMatch> fileMatches = scanLocalFile(options, extractor, matchEngine);
+                long durationMs = System.currentTimeMillis() - startTime;
+                if ("json".equals(options.getOutput())) {
+                    reportWriter.printFileJsonOutput(options, fileMatches, durationMs);
+                } else {
+                    reportWriter.printFileTextOutput(options, fileMatches, durationMs);
+                }
             } else {
                 Crawler crawler = new Crawler(options, extractor, matchEngine);
-                result = crawler.crawl();
-            }
-            result.durationMs = System.currentTimeMillis() - startTime;
-
-            if ("json".equals(options.getOutput())) {
-                reportWriter.printJsonOutput(result, options);
-            } else {
-                reportWriter.printTextOutput(result);
+                CrawlResult result = crawler.crawl();
+                result.durationMs = System.currentTimeMillis() - startTime;
+                if ("json".equals(options.getOutput())) {
+                    reportWriter.printJsonOutput(result, options);
+                } else {
+                    reportWriter.printTextOutput(result);
+                }
             }
 
         } catch (IllegalArgumentException e) {
@@ -69,7 +76,7 @@ public class Main {
         }
     }
 
-    private static CrawlResult scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
+    private static List<FileMatch> scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
             throws Exception {
         File f = new File(options.getFile());
         if (!f.exists() || !f.isFile())
@@ -77,14 +84,30 @@ public class Main {
 
         byte[] bytes = Files.readAllBytes(f.toPath());
         String text = extractor.extractTextFromBinary(bytes, f.getName(), null);
-        int count = matchEngine.countMatches(text, options.getKeyword(), options.getMode());
+        return findLineMatches(text, options.getKeyword(), options.getMode(), matchEngine);
+    }
 
-        CrawlResult result = new CrawlResult();
-        result.visitedCount = 1;
-        result.parsedCount = 1;
-        result.docsCount = 1;
-        if (count > 0) result.addMatch(f.getAbsolutePath(), count);
-        return result;
+    static List<FileMatch> findLineMatches(String text, String keyword, String mode, MatchEngine matchEngine) {
+        List<FileMatch> matches = new ArrayList<>();
+        if (text == null || text.isEmpty()) return matches;
+
+        // Tika uses \f (form feed) as page separator for multi-page documents (e.g. PDF)
+        String normalized = text.replace("\r\n", "\n").replace("\r", "\n");
+        boolean hasPages = normalized.contains("\f");
+        String[] pages = normalized.split("\f", -1);
+
+        for (int p = 0; p < pages.length; p++) {
+            String[] lines = pages[p].split("\n", -1);
+            for (int l = 0; l < lines.length; l++) {
+                int count = matchEngine.countMatches(lines[l], keyword, mode);
+                if (count > 0) {
+                    String snippet = lines[l].trim();
+                    if (snippet.length() > 120) snippet = snippet.substring(0, 117) + "...";
+                    matches.add(new FileMatch(hasPages ? p + 1 : 0, l + 1, count, snippet));
+                }
+            }
+        }
+        return matches;
     }
 
     private static void setupLogging() {

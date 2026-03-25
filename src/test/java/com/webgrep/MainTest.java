@@ -1,13 +1,12 @@
 package com.webgrep;
 
 import com.webgrep.config.CliOptions;
-import com.webgrep.core.ContentExtractor;
 import com.webgrep.core.MatchEngine;
 import com.webgrep.reporting.CrawlResult;
+import com.webgrep.reporting.FileMatch;
 import com.webgrep.utils.UrlUtils;
 import org.junit.Test;
-import java.io.File;
-import java.nio.file.Files;
+import java.util.List;
 import static org.junit.Assert.*;
 
 public class MainTest {
@@ -237,15 +236,53 @@ public class MainTest {
     }
 
     @Test
-    public void testFileModeTextExtraction() throws Exception {
-        File tmp = File.createTempFile("webgrep-test", ".txt");
-        tmp.deleteOnExit();
-        Files.write(tmp.toPath(), "The quick brown fox jumps over the lazy fox".getBytes());
+    public void testFindLineMatchesBasic() {
+        MatchEngine engine = new MatchEngine();
+        String text = "no match here\nThe quick brown fox\nanother fox line\nnothing";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
 
-        ContentExtractor extractor = new ContentExtractor(10 * 1024 * 1024);
-        byte[] bytes = Files.readAllBytes(tmp.toPath());
-        String text = extractor.extractTextFromBinary(bytes, tmp.getName(), null);
-        int count = new MatchEngine().countMatches(text, "fox", "default");
-        assertEquals(2, count);
+        assertEquals(2, matches.size());
+        assertEquals(2, matches.get(0).line());
+        assertEquals(1, matches.get(0).count());
+        assertEquals("The quick brown fox", matches.get(0).snippet());
+        assertEquals(3, matches.get(1).line());
+        // page=0 means no page structure
+        assertEquals(0, matches.get(0).page());
+    }
+
+    @Test
+    public void testFindLineMatchesWithPages() {
+        MatchEngine engine = new MatchEngine();
+        // \f is Tika's page separator
+        String text = "intro line\nfox on page one\f\nno match\nfox on page two";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+
+        assertEquals(2, matches.size());
+        assertEquals(1, matches.get(0).page());
+        assertEquals(2, matches.get(0).line());
+        assertEquals(2, matches.get(1).page());
+        assertEquals(3, matches.get(1).line());
+    }
+
+    @Test
+    public void testFindLineMatchesMultipleMatchesPerLine() {
+        MatchEngine engine = new MatchEngine();
+        String text = "fox and fox and fox";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+
+        assertEquals(1, matches.size());
+        assertEquals(3, matches.get(0).count());
+        assertEquals(1, matches.get(0).line());
+    }
+
+    @Test
+    public void testFindLineMatchesSnippetTruncated() {
+        MatchEngine engine = new MatchEngine();
+        String longLine = "fox " + "x".repeat(200);
+        List<FileMatch> matches = Main.findLineMatches(longLine, "fox", "default", engine);
+
+        assertEquals(1, matches.size());
+        assertTrue(matches.get(0).snippet().length() <= 120);
+        assertTrue(matches.get(0).snippet().endsWith("..."));
     }
 }

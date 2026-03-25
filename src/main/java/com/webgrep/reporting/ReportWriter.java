@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class ReportWriter {
 
@@ -129,6 +130,58 @@ public class ReportWriter {
             Map.Entry<String, String> entry = blockedList.get(i);
             json.append("    { \"url\": \"").append(escapeJson(entry.getKey())).append("\", \"reason\": \"").append(escapeJson(entry.getValue())).append("\" }");
             if (i < blockedList.size() - 1) json.append(",");
+            json.append("\n");
+        }
+        json.append("  ]\n");
+        json.append("}\n");
+        System.out.println(json.toString());
+    }
+
+    public void printFileTextOutput(CliOptions options, List<FileMatch> matches, long durationMs) {
+        int total = matches.stream().mapToInt(FileMatch::count).sum();
+        boolean hasPages = matches.stream().anyMatch(m -> m.page() > 0);
+
+        System.out.println("--- WebGrep Results ---");
+        System.out.println("Duration: " + formatDuration(durationMs));
+        System.out.println("File: " + options.getFile());
+        System.out.println("Total matches found: " + total);
+
+        if (matches.isEmpty()) return;
+
+        System.out.println("\nMatches:");
+        for (FileMatch m : matches) {
+            String loc = hasPages
+                    ? String.format("p.%d, l.%d", m.page(), m.line())
+                    : String.format("l.%d", m.line());
+            String countStr = m.count() == 1 ? "(1 match)" : "(" + m.count() + " matches)";
+            System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, m.snippet());
+        }
+    }
+
+    public void printFileJsonOutput(CliOptions options, List<FileMatch> matches, long durationMs) {
+        int total = matches.stream().mapToInt(FileMatch::count).sum();
+        boolean hasPages = matches.stream().anyMatch(m -> m.page() > 0);
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"query\": {\n");
+        json.append("    \"file\": \"").append(escapeJson(options.getFile())).append("\",\n");
+        json.append("    \"keyword\": \"").append(escapeJson(options.getKeyword())).append("\",\n");
+        json.append("    \"mode\": \"").append(escapeJson(options.getMode())).append("\"\n");
+        json.append("  },\n");
+        json.append("  \"stats\": {\n");
+        json.append("    \"duration_ms\": ").append(durationMs).append(",\n");
+        json.append("    \"total_matches\": ").append(total).append("\n");
+        json.append("  },\n");
+        json.append("  \"matches\": [\n");
+        for (int i = 0; i < matches.size(); i++) {
+            FileMatch m = matches.get(i);
+            json.append("    {");
+            if (hasPages) json.append(" \"page\": ").append(m.page()).append(",");
+            json.append(" \"line\": ").append(m.line()).append(",");
+            json.append(" \"count\": ").append(m.count()).append(",");
+            json.append(" \"snippet\": \"").append(escapeJson(m.snippet())).append("\" }");
+            if (i < matches.size() - 1) json.append(",");
             json.append("\n");
         }
         json.append("  ]\n");
