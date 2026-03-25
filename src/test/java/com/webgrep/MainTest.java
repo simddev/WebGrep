@@ -472,5 +472,81 @@ public class MainTest {
         assertEquals(3, options.getDepth());
         assertEquals("fuzzy", options.getMode());
         assertNull(options.getFile());
+        assertNull(options.getFolder());
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // CliOptions — --folder flag
+    // ────────────────────────────────────────────────────────────────
+
+    @Test
+    public void testFolderOptionShortFlag() {
+        String[] args = {"-F", "/tmp/docs", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertEquals("/tmp/docs", options.getFolder());
+        assertNull(options.getUrl());
+        assertNull(options.getFile());
+    }
+
+    @Test
+    public void testFolderOptionLongFlag() {
+        String[] args = {"--folder", "/tmp/docs", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertEquals("/tmp/docs", options.getFolder());
+    }
+
+    @Test
+    public void testFolderModeValidationRequiresKeyword() {
+        String[] args = {"-F", "/tmp/docs"};
+        CliOptions options = CliOptions.parse(args);
+        try {
+            options.validate();
+            fail("Expected IllegalArgumentException for missing keyword");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Keyword"));
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testFolderAndFileMutuallyExclusive() {
+        String[] args = {"-F", "/tmp/docs", "-f", "/tmp/file.pdf", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testFolderAndUrlMutuallyExclusive() {
+        String[] args = {"-F", "/tmp/docs", "-u", "http://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAllThreeMutuallyExclusive() {
+        String[] args = {"-u", "http://example.com", "-f", "/tmp/f.pdf", "-F", "/tmp/docs", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
+    public void testFolderModeAcceptsMatchModeOption() {
+        String[] args = {"-F", "/tmp/docs", "-k", "test", "-m", "fuzzy"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals("fuzzy", options.getMode());
+    }
+
+    @Test
+    public void testGetFolderIsNullInUrlMode() {
+        String[] args = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertNull(options.getFolder());
+    }
+
+    @Test
+    public void testGetFolderIsNullInFileMode() {
+        String[] args = {"-f", "/tmp/file.pdf", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertNull(options.getFolder());
     }
 }
