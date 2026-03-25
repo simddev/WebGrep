@@ -6,10 +6,12 @@ import com.webgrep.core.Crawler;
 import com.webgrep.core.MatchEngine;
 import com.webgrep.reporting.CrawlResult;
 import com.webgrep.reporting.FileMatch;
+import com.webgrep.reporting.FileScanResult;
 import com.webgrep.reporting.ReportWriter;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -40,7 +42,15 @@ public class Main {
             ReportWriter reportWriter = new ReportWriter();
             long startTime = System.currentTimeMillis();
 
-            if (options.getFile() != null) {
+            if (options.getFolder() != null) {
+                FolderScan scan = scanFolder(options, extractor, matchEngine);
+                long durationMs = System.currentTimeMillis() - startTime;
+                if ("json".equals(options.getOutput())) {
+                    reportWriter.printFolderJsonOutput(options, scan.results(), scan.scanned(), scan.skipped(), durationMs);
+                } else {
+                    reportWriter.printFolderTextOutput(options, scan.results(), scan.scanned(), scan.skipped(), durationMs);
+                }
+            } else if (options.getFile() != null) {
                 List<FileMatch> fileMatches = scanLocalFile(options, extractor, matchEngine);
                 long durationMs = System.currentTimeMillis() - startTime;
                 if ("json".equals(options.getOutput())) {
@@ -74,6 +84,44 @@ public class Main {
             }
             System.exit(2);
         }
+    }
+
+    private record FolderScan(List<FileScanResult> results, int scanned, int skipped) {}
+
+    private static FolderScan scanFolder(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
+            throws Exception {
+        File dir = new File(options.getFolder());
+        if (!dir.exists() || !dir.isDirectory())
+            throw new IllegalArgumentException("Folder not found: " + options.getFolder());
+
+        List<Path> files;
+        try (var stream = Files.walk(dir.toPath())) {
+            files = stream.filter(Files::isRegularFile).sorted().toList();
+        }
+
+        List<FileScanResult> results = new ArrayList<>();
+        int scanned = 0, skipped = 0;
+
+        for (Path path : files) {
+            if (path.toFile().length() > options.getMaxBytes()) {
+                skipped++;
+                continue;
+            }
+            scanned++;
+            System.err.printf("\r  Scanning (%d/%d): %-80s", scanned, files.size() - skipped, path.getFileName());
+            try {
+                byte[] bytes = Files.readAllBytes(path);
+                String text = extractor.extractTextFromBinary(bytes, path.getFileName().toString(), null);
+                List<FileMatch> matches = findLineMatches(text, options.getKeyword(), options.getMode(), matchEngine);
+                if (!matches.isEmpty()) {
+                    results.add(new FileScanResult(path.toString(), matches));
+                }
+            } catch (Exception ignored) {
+                // unreadable file — skip silently
+            }
+        }
+        System.err.print("\r" + " ".repeat(100) + "\r");
+        return new FolderScan(results, scanned, skipped);
     }
 
     private static List<FileMatch> scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)

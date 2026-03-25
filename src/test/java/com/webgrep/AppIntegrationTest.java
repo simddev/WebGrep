@@ -153,4 +153,102 @@ public class AppIntegrationTest {
         assertTrue(output.contains("Total matches found: 3"));
         assertTrue(output.contains("(3 matches)"));
     }
+
+    // ── --folder end-to-end ───────────────────────────────────────────────────
+
+    @Test
+    public void testHelpMentionsFolderFlag() {
+        Main.main(new String[]{"--help"});
+        String output = out();
+        assertTrue("Help must document --folder flag", output.contains("--folder"));
+        assertTrue("Help must document -F short flag", output.contains("-F"));
+    }
+
+    @Test
+    public void testFolderModeEndToEndTextOutput() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-folder-e2e").toFile();
+        dir.deleteOnExit();
+
+        File a = new File(dir, "alpha.txt");
+        File b = new File(dir, "beta.txt");
+        Files.write(a.toPath(), "no match here\nfox on line two\nanother fox".getBytes());
+        Files.write(b.toPath(), "nothing at all".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox"});
+        String output = out();
+
+        assertTrue(output.contains("--- WebGrep Results ---"));
+        assertTrue(output.contains("Folder: " + dir.getAbsolutePath()));
+        assertTrue(output.contains("Files scanned: 2"));
+        assertTrue(output.contains("With matches: 1"));
+        assertTrue(output.contains("Total matches found: 2"));
+        assertTrue(output.contains("alpha.txt"));
+        assertTrue(output.contains("l.2"));
+        assertTrue(output.contains("l.3"));
+        assertFalse("beta.txt has no matches — must not appear", output.contains("beta.txt"));
+    }
+
+    @Test
+    public void testFolderModeEndToEndRecursive() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-recursive-e2e").toFile();
+        dir.deleteOnExit();
+        File sub = new File(dir, "sub");
+        sub.mkdir();
+
+        Files.write(new File(dir, "root.txt").toPath(), "fox in root".getBytes());
+        Files.write(new File(sub, "nested.txt").toPath(), "fox in sub".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox"});
+        String output = out();
+
+        assertTrue(output.contains("Files scanned: 2"));
+        assertTrue(output.contains("With matches: 2"));
+        assertTrue(output.contains("root.txt"));
+        assertTrue(output.contains("nested.txt"));
+    }
+
+    @Test
+    public void testFolderModeEndToEndNoMatches() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-nomatch-e2e").toFile();
+        dir.deleteOnExit();
+        Files.write(new File(dir, "f.txt").toPath(), "no match here at all".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "elephant"});
+        String output = out();
+
+        assertTrue(output.contains("Total matches found: 0"));
+        assertTrue(output.contains("With matches: 0"));
+    }
+
+    @Test
+    public void testFolderModeEndToEndJsonOutput() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-json-folder-e2e").toFile();
+        dir.deleteOnExit();
+        Files.write(new File(dir, "doc.txt").toPath(), "fox on line one\nno match".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox", "-o", "json"});
+        String json = out();
+
+        assertTrue(json.contains("\"folder\":"));
+        assertTrue(json.contains("\"files_scanned\": 1"));
+        assertTrue(json.contains("\"files_with_matches\": 1"));
+        assertTrue(json.contains("\"total_matches\": 1"));
+        assertTrue(json.contains("\"results\":"));
+        assertTrue(json.contains("\"line\": 1"));
+        assertFalse("url field must not appear in folder-mode JSON", json.contains("\"url\""));
+    }
+
+    @Test
+    public void testFolderModeSkipsFilesOverMaxBytes() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-size-e2e").toFile();
+        dir.deleteOnExit();
+        // Write a file larger than the 10-byte limit we set
+        Files.write(new File(dir, "big.txt").toPath(), "fox fox fox fox fox fox fox".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox", "-b", "5"});
+        String output = out();
+
+        assertTrue(output.contains("Skipped (too large): 1"));
+        assertTrue(output.contains("Total matches found: 0"));
+    }
 }

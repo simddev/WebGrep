@@ -6,6 +6,7 @@ import java.util.Map;
 public class CliOptions {
     private String url;
     private String file;
+    private String folder;
     private String keyword;
     private int depth = 1;
     private String mode = "default";
@@ -56,6 +57,7 @@ public class CliOptions {
 
         options.url = params.get("url");
         options.file = params.get("file");
+        options.folder = params.get("folder");
         options.keyword = params.get("keyword");
 
         try {
@@ -88,6 +90,7 @@ public class CliOptions {
         return switch (c) {
             case 'u' -> "url";
             case 'f' -> "file";
+            case 'F' -> "folder";
             case 'k' -> "keyword";
             case 'd' -> "depth";
             case 'm' -> "mode";
@@ -108,10 +111,12 @@ public class CliOptions {
 
     public void validate() {
         if (help) return;
-        if (file != null && url != null)
-            throw new IllegalArgumentException("--file and --url are mutually exclusive");
-        if (file == null) {
-            if (url == null || url.isEmpty()) throw new IllegalArgumentException("URL is required (-u, --url)");
+        int inputCount = (url != null ? 1 : 0) + (file != null ? 1 : 0) + (folder != null ? 1 : 0);
+        if (inputCount > 1)
+            throw new IllegalArgumentException("--url, --file, and --folder are mutually exclusive — specify only one");
+        if (inputCount == 0)
+            throw new IllegalArgumentException("Specify a target: --url <URL>, --file <path>, or --folder <path>");
+        if (url != null) {
             if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") && !url.startsWith("http://") && !url.startsWith("https://"))
                 throw new IllegalArgumentException("URL scheme must be http or https");
         }
@@ -134,8 +139,9 @@ public class CliOptions {
         System.out.println("WebGrep - A high-performance web crawler and keyword searcher");
         System.out.println("\nUsage: java -jar WebGrep.jar -u <URL> -k <keyword> [options]");
         System.out.println("\nOptions:");
-        System.out.println("  -u, --url <URL>          The starting URL (required, unless --file is used)");
+        System.out.println("  -u, --url <URL>          The starting URL (required, unless --file or --folder is used)");
         System.out.println("  -f, --file <path>        Search a local file instead of crawling the web");
+        System.out.println("  -F, --folder <path>      Search all files in a local folder (recursive)");
         System.out.println("  -k, --keyword <word>     The keyword to search for (required)");
         System.out.println("  -d, --depth <n>          Maximum crawl depth (default: 1)");
         System.out.println("  -m, --mode <mode>        Match mode: default, exact, or fuzzy");
@@ -155,6 +161,7 @@ public class CliOptions {
     // Getters
     public String getUrl() { return url; }
     public String getFile() { return file; }
+    public String getFolder() { return folder; }
     public String getKeyword() { return keyword; }
     public int getDepth() { return depth; }
     public String getMode() { return mode; }

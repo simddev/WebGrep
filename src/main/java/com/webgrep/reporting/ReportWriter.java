@@ -136,6 +136,82 @@ public class ReportWriter {
         System.out.println(json.toString());
     }
 
+    public void printFolderTextOutput(CliOptions options, List<FileScanResult> results,
+                                      int filesScanned, int filesSkipped, long durationMs) {
+        int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
+
+        System.out.println("--- WebGrep Results ---");
+        System.out.println("Duration: " + formatDuration(durationMs));
+        System.out.println("Folder: " + options.getFolder());
+        System.out.println("Files scanned: " + filesScanned);
+        if (filesSkipped > 0)
+            System.out.println("  Skipped (too large): " + filesSkipped);
+        System.out.println("  With matches: " + results.size());
+        System.out.println("Total matches found: " + totalMatches);
+
+        if (results.isEmpty()) return;
+
+        for (FileScanResult file : results) {
+            boolean hasPages = file.matches().stream().anyMatch(m -> m.page() > 0);
+            System.out.println("\n" + file.path() + "  (" + file.totalMatches() + " match"
+                    + (file.totalMatches() == 1 ? "" : "es") + ")");
+            for (FileMatch m : file.matches()) {
+                String loc = hasPages
+                        ? String.format("p.%d, l.%d", m.page(), m.line())
+                        : String.format("l.%d", m.line());
+                String countStr = m.count() == 1 ? "(1 match)" : "(" + m.count() + " matches)";
+                System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, m.snippet());
+            }
+        }
+    }
+
+    public void printFolderJsonOutput(CliOptions options, List<FileScanResult> results,
+                                      int filesScanned, int filesSkipped, long durationMs) {
+        int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"query\": {\n");
+        json.append("    \"folder\": \"").append(escapeJson(options.getFolder())).append("\",\n");
+        json.append("    \"keyword\": \"").append(escapeJson(options.getKeyword())).append("\",\n");
+        json.append("    \"mode\": \"").append(escapeJson(options.getMode())).append("\"\n");
+        json.append("  },\n");
+        json.append("  \"stats\": {\n");
+        json.append("    \"duration_ms\": ").append(durationMs).append(",\n");
+        json.append("    \"files_scanned\": ").append(filesScanned).append(",\n");
+        json.append("    \"files_skipped\": ").append(filesSkipped).append(",\n");
+        json.append("    \"files_with_matches\": ").append(results.size()).append(",\n");
+        json.append("    \"total_matches\": ").append(totalMatches).append("\n");
+        json.append("  },\n");
+        json.append("  \"results\": [\n");
+        for (int i = 0; i < results.size(); i++) {
+            FileScanResult file = results.get(i);
+            boolean hasPages = file.matches().stream().anyMatch(m -> m.page() > 0);
+            json.append("    {\n");
+            json.append("      \"file\": \"").append(escapeJson(file.path())).append("\",\n");
+            json.append("      \"total_matches\": ").append(file.totalMatches()).append(",\n");
+            json.append("      \"matches\": [\n");
+            List<FileMatch> matches = file.matches();
+            for (int j = 0; j < matches.size(); j++) {
+                FileMatch m = matches.get(j);
+                json.append("        {");
+                if (hasPages) json.append(" \"page\": ").append(m.page()).append(",");
+                json.append(" \"line\": ").append(m.line()).append(",");
+                json.append(" \"count\": ").append(m.count()).append(",");
+                json.append(" \"snippet\": \"").append(escapeJson(m.snippet())).append("\" }");
+                if (j < matches.size() - 1) json.append(",");
+                json.append("\n");
+            }
+            json.append("      ]\n");
+            json.append("    }");
+            if (i < results.size() - 1) json.append(",");
+            json.append("\n");
+        }
+        json.append("  ]\n");
+        json.append("}\n");
+        System.out.println(json.toString());
+    }
+
     public void printFileTextOutput(CliOptions options, List<FileMatch> matches, long durationMs) {
         int total = matches.stream().mapToInt(FileMatch::count).sum();
         boolean hasPages = matches.stream().anyMatch(m -> m.page() > 0);

@@ -8,6 +8,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.webgrep.reporting.FileScanResult;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.util.Arrays;
@@ -294,5 +295,149 @@ public class ReportWriterTest {
         );
         new ReportWriter().printFileJsonOutput(fileOpts("/tmp/t.txt", "x"), matches, 50);
         assertTrue(out.toString().contains("\"total_matches\": 6"));
+    }
+
+    // ── folder mode text output ───────────────────────────────────────────────
+
+    private CliOptions folderOpts(String folder, String keyword) {
+        return CliOptions.parse(new String[]{"-F", folder, "-k", keyword});
+    }
+
+    private FileScanResult fileResult(String path, FileMatch... matches) {
+        return new FileScanResult(path, Arrays.asList(matches));
+    }
+
+    @Test
+    public void testFolderTextOutputNoMatches() {
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 200);
+        String output = out.toString();
+        assertTrue(output.contains("--- WebGrep Results ---"));
+        assertTrue(output.contains("Folder: /tmp/docs"));
+        assertTrue(output.contains("Files scanned: 5"));
+        assertTrue(output.contains("With matches: 0"));
+        assertTrue(output.contains("Total matches found: 0"));
+        assertFalse("File listing must not appear when there are no matches", output.contains("matches)"));
+    }
+
+    @Test
+    public void testFolderTextOutputSkippedFilesShownWhenNonZero() {
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 2, 100);
+        assertTrue(out.toString().contains("Skipped (too large): 2"));
+    }
+
+    @Test
+    public void testFolderTextOutputSkippedFilesHiddenWhenZero() {
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 0, 100);
+        assertFalse(out.toString().contains("Skipped"));
+    }
+
+    @Test
+    public void testFolderTextOutputWithMultipleFiles() {
+        List<FileScanResult> results = Arrays.asList(
+                fileResult("/tmp/docs/a.txt", new FileMatch(0, 2, 1, "fox here")),
+                fileResult("/tmp/docs/b.pdf",
+                        new FileMatch(1, 3, 1, "fox p1"),
+                        new FileMatch(2, 1, 2, "fox fox p2"))
+        );
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), results, 10, 0, 500);
+        String output = out.toString();
+
+        assertTrue(output.contains("Total matches found: 4")); // 1+1+2
+        assertTrue(output.contains("With matches: 2"));
+        assertTrue(output.contains("/tmp/docs/a.txt  (1 match)"));
+        assertTrue(output.contains("/tmp/docs/b.pdf  (3 matches)"));
+        assertTrue(output.contains("l.2"));
+        assertTrue(output.contains("p.1, l.3"));
+        assertTrue(output.contains("p.2, l.1"));
+        assertTrue(output.contains("(2 matches)"));
+    }
+
+    @Test
+    public void testFolderTextOutputNoPageColumnWhenAllPageZero() {
+        List<FileScanResult> results = List.of(
+                fileResult("/tmp/f.txt", new FileMatch(0, 5, 1, "match"))
+        );
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp", "x"), results, 1, 0, 50);
+        assertFalse("Page column must not appear when all page=0", out.toString().contains("p."));
+    }
+
+    // ── folder mode JSON output ───────────────────────────────────────────────
+
+    @Test
+    public void testFolderJsonOutputStructure() {
+        List<FileScanResult> results = List.of(
+                fileResult("/tmp/docs/a.txt", new FileMatch(0, 2, 3, "triple fox"))
+        );
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp/docs", "fox"), results, 7, 1, 300);
+        String json = out.toString();
+
+        assertTrue(json.contains("\"folder\": \"/tmp/docs\""));
+        assertTrue(json.contains("\"keyword\": \"fox\""));
+        assertTrue(json.contains("\"files_scanned\": 7"));
+        assertTrue(json.contains("\"files_skipped\": 1"));
+        assertTrue(json.contains("\"files_with_matches\": 1"));
+        assertTrue(json.contains("\"total_matches\": 3"));
+        assertTrue(json.contains("\"results\":"));
+        assertTrue(json.contains("\"file\": \"/tmp/docs/a.txt\""));
+        assertTrue(json.contains("\"total_matches\": 3"));
+        assertTrue(json.contains("\"line\": 2"));
+        assertTrue(json.contains("\"count\": 3"));
+        assertFalse("url field must not appear in folder-mode JSON", json.contains("\"url\""));
+        assertFalse("depth field must not appear in folder-mode JSON", json.contains("\"depth\""));
+    }
+
+    @Test
+    public void testFolderJsonOutputOmitsPageWhenNotPresent() {
+        List<FileScanResult> results = List.of(
+                fileResult("/tmp/f.txt", new FileMatch(0, 1, 1, "snippet"))
+        );
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp", "x"), results, 1, 0, 50);
+        assertFalse(out.toString().contains("\"page\""));
+    }
+
+    @Test
+    public void testFolderJsonOutputIncludesPageWhenPresent() {
+        List<FileScanResult> results = List.of(
+                fileResult("/tmp/f.pdf",
+                        new FileMatch(1, 2, 1, "p1"),
+                        new FileMatch(3, 4, 1, "p3"))
+        );
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp", "x"), results, 1, 0, 50);
+        String json = out.toString();
+        assertTrue(json.contains("\"page\": 1"));
+        assertTrue(json.contains("\"page\": 3"));
+    }
+
+    @Test
+    public void testFolderJsonOutputEmptyResults() {
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp/docs", "x"), Collections.emptyList(), 10, 2, 100);
+        String json = out.toString();
+        assertTrue(json.contains("\"total_matches\": 0"));
+        assertTrue(json.contains("\"files_with_matches\": 0"));
+        assertTrue(json.contains("\"results\":"));
+    }
+
+    @Test
+    public void testFolderJsonOutputMultipleFilesOrdered() {
+        List<FileScanResult> results = Arrays.asList(
+                fileResult("/tmp/a.txt", new FileMatch(0, 1, 2, "aa")),
+                fileResult("/tmp/b.txt", new FileMatch(0, 3, 1, "bb"))
+        );
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp", "x"), results, 5, 0, 50);
+        String json = out.toString();
+        int posA = json.indexOf("/tmp/a.txt");
+        int posB = json.indexOf("/tmp/b.txt");
+        assertTrue("Files must appear in the order provided", posA < posB);
+        assertTrue(json.contains("\"total_matches\": 3")); // 2+1
     }
 }
