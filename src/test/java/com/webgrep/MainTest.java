@@ -1,10 +1,13 @@
 package com.webgrep;
 
 import com.webgrep.config.CliOptions;
+import com.webgrep.core.ContentExtractor;
 import com.webgrep.core.MatchEngine;
 import com.webgrep.reporting.CrawlResult;
 import com.webgrep.utils.UrlUtils;
 import org.junit.Test;
+import java.io.File;
+import java.nio.file.Files;
 import static org.junit.Assert.*;
 
 public class MainTest {
@@ -203,5 +206,46 @@ public class MainTest {
         String[] args = {"-u", "http://example.com", "-k", "test", "--delay-ms", "-1"};
         CliOptions options = CliOptions.parse(args);
         options.validate();
+    }
+
+    @Test
+    public void testFileOptionParsed() {
+        String[] args = {"-f", "/tmp/file.pdf", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertEquals("/tmp/file.pdf", options.getFile());
+        assertNull(options.getUrl());
+    }
+
+    @Test
+    public void testFileModeValidationRequiresKeyword() {
+        // --file without --keyword must still fail
+        String[] args = {"-f", "/tmp/file.pdf"};
+        CliOptions options = CliOptions.parse(args);
+        try {
+            options.validate();
+            fail("Expected IllegalArgumentException for missing keyword");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Keyword"));
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testFileModeAndUrlMutuallyExclusive() {
+        String[] args = {"-f", "/tmp/file.pdf", "-u", "http://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
+    public void testFileModeTextExtraction() throws Exception {
+        File tmp = File.createTempFile("webgrep-test", ".txt");
+        tmp.deleteOnExit();
+        Files.write(tmp.toPath(), "The quick brown fox jumps over the lazy fox".getBytes());
+
+        ContentExtractor extractor = new ContentExtractor(10 * 1024 * 1024);
+        byte[] bytes = Files.readAllBytes(tmp.toPath());
+        String text = extractor.extractTextFromBinary(bytes, tmp.getName(), null);
+        int count = new MatchEngine().countMatches(text, "fox", "default");
+        assertEquals(2, count);
     }
 }

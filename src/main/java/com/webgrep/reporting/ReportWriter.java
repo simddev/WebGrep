@@ -73,9 +73,13 @@ public class ReportWriter {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
         json.append("  \"query\": {\n");
-        json.append("    \"url\": \"").append(escapeJson(options.getUrl())).append("\",\n");
+        if (options.getFile() != null) {
+            json.append("    \"file\": \"").append(escapeJson(options.getFile())).append("\",\n");
+        } else {
+            json.append("    \"url\": \"").append(escapeJson(options.getUrl())).append("\",\n");
+            json.append("    \"depth\": ").append(options.getDepth()).append(",\n");
+        }
         json.append("    \"keyword\": \"").append(escapeJson(options.getKeyword())).append("\",\n");
-        json.append("    \"depth\": ").append(options.getDepth()).append(",\n");
         json.append("    \"mode\": \"").append(escapeJson(options.getMode())).append("\"\n");
         json.append("  },\n");
         json.append("  \"stats\": {\n");

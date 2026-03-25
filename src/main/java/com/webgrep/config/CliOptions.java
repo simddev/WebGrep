@@ -5,6 +5,7 @@ import java.util.Map;
 
 public class CliOptions {
     private String url;
+    private String file;
     private String keyword;
     private int depth = 1;
     private String mode = "default";
@@ -54,6 +55,7 @@ public class CliOptions {
         }
 
         options.url = params.get("url");
+        options.file = params.get("file");
         options.keyword = params.get("keyword");
 
         try {
@@ -85,6 +87,7 @@ public class CliOptions {
     private static String mapShortFlag(char c) {
         return switch (c) {
             case 'u' -> "url";
+            case 'f' -> "file";
             case 'k' -> "keyword";
             case 'd' -> "depth";
             case 'm' -> "mode";
@@ -105,9 +108,13 @@ public class CliOptions {
 
     public void validate() {
         if (help) return;
-        if (url == null || url.isEmpty()) throw new IllegalArgumentException("URL is required (-u, --url)");
-        if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") && !url.startsWith("http://") && !url.startsWith("https://"))
-            throw new IllegalArgumentException("URL scheme must be http or https");
+        if (file != null && url != null)
+            throw new IllegalArgumentException("--file and --url are mutually exclusive");
+        if (file == null) {
+            if (url == null || url.isEmpty()) throw new IllegalArgumentException("URL is required (-u, --url)");
+            if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") && !url.startsWith("http://") && !url.startsWith("https://"))
+                throw new IllegalArgumentException("URL scheme must be http or https");
+        }
         if (keyword == null || keyword.isEmpty()) throw new IllegalArgumentException("Keyword is required (-k, --keyword)");
         if (depth < 0) throw new IllegalArgumentException("Depth must be non-negative");
         if (maxPages <= 0) throw new IllegalArgumentException("Max pages must be greater than zero");
@@ -127,7 +134,8 @@ public class CliOptions {
         System.out.println("WebGrep - A high-performance web crawler and keyword searcher");
         System.out.println("\nUsage: java -jar WebGrep.jar -u <URL> -k <keyword> [options]");
         System.out.println("\nOptions:");
-        System.out.println("  -u, --url <URL>          The starting URL (required)");
+        System.out.println("  -u, --url <URL>          The starting URL (required, unless --file is used)");
+        System.out.println("  -f, --file <path>        Search a local file instead of crawling the web");
         System.out.println("  -k, --keyword <word>     The keyword to search for (required)");
         System.out.println("  -d, --depth <n>          Maximum crawl depth (default: 1)");
         System.out.println("  -m, --mode <mode>        Match mode: default, exact, or fuzzy");
@@ -146,6 +154,7 @@ public class CliOptions {
 
     // Getters
     public String getUrl() { return url; }
+    public String getFile() { return file; }
     public String getKeyword() { return keyword; }
     public int getDepth() { return depth; }
     public String getMode() { return mode; }
