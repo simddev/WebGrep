@@ -19,6 +19,20 @@ import java.util.regex.Pattern;
 
 import com.webgrep.utils.UrlUtils;
 
+/**
+ * Extracts searchable text from HTML pages and binary documents.
+ *
+ * <p>HTML content is extracted via Jsoup (title, body text, and meta description/keywords tags).
+ * All other content types — PDF, DOCX, ODT, XLSX, EPUB, and 100+ other formats — are parsed
+ * by Apache Tika. Tika is invoked with a configurable {@code maxStringLength} (derived from
+ * {@code --max-bytes}) and wrapped in a 30-second timeout to prevent hangs on corrupt files.
+ *
+ * <p>If Tika fails or times out, the raw bytes are returned as a UTF-8 string as a last resort.
+ *
+ * <p>Note: Tika uses the form-feed character ({@code \f}, U+000C) as a page separator in
+ * multi-page documents such as PDFs. Callers that need per-page line numbers should split the
+ * extracted text on {@code \f} before further processing.
+ */
 public class ContentExtractor {
     private final Tika tika;
     private static final int MAX_LINKS_PER_PAGE = 5000;

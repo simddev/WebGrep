@@ -3,6 +3,18 @@ package com.webgrep.utils;
 import java.text.Normalizer;
 import java.net.URL;
 
+/**
+ * Utility methods for URL normalisation and link filtering.
+ *
+ * <p>{@link #normalizeUrl(String, String)} resolves relative URLs against a base, lower-cases
+ * the scheme and host, strips default ports, and collapses duplicate slashes in the path.
+ * Protocol-relative URLs ({@code //example.com/...}) are expanded using the base URL's scheme.
+ *
+ * <p>{@link #isIgnoredLink(String)} returns {@code true} for URLs that are never useful to
+ * crawl — static assets (CSS, JS, images, fonts, video, archives), known social-share redirect
+ * URLs, and tag/author taxonomy pages. Document URLs (PDF, DOCX, TXT) are explicitly
+ * <em>not</em> ignored so that Tika can extract their text.
+ */
 public class UrlUtils {
 
     public static String normalizeUrl(String urlString, String baseUrlString) {

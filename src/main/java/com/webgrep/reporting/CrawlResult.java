@@ -3,6 +3,16 @@ package com.webgrep.reporting;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Accumulates the results and statistics produced by a single web crawl run.
+ *
+ * <p>Mutable by design — the {@link com.webgrep.core.Crawler} fills in fields as pages are
+ * visited, and {@link ReportWriter} reads them when the crawl is complete. Fields are public
+ * for direct access to keep the data-transfer style simple.
+ *
+ * <p>Error counts are pre-populated to zero for every {@link ErrorType} on construction so
+ * that callers can always safely call {@link #incrementError(ErrorType)} without null checks.
+ */
 public class CrawlResult {
     public enum ErrorType {
         NETWORK_ERROR,

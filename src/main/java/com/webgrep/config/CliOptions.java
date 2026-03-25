@@ -3,6 +3,20 @@ package com.webgrep.config;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Parses and validates all command-line options accepted by WebGrep.
+ *
+ * <p>Supports three mutually exclusive input modes:
+ * <ul>
+ *   <li><b>Web crawl</b> — {@code --url} with optional depth, delay, and crawl controls</li>
+ *   <li><b>Local file</b> — {@code --file} searches a single file offline</li>
+ *   <li><b>Local folder</b> — {@code --folder} recursively searches all files in a directory</li>
+ * </ul>
+ *
+ * <p>Use {@link #parse(String[])} to build an instance from raw CLI arguments,
+ * then call {@link #validate()} to enforce required fields and mutual-exclusion rules
+ * before passing the options to other components.
+ */
 public class CliOptions {
     private String url;
     private String file;
