@@ -235,6 +235,10 @@ public class MainTest {
         options.validate();
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // findLineMatches — edge cases
+    // ────────────────────────────────────────────────────────────────
+
     @Test
     public void testFindLineMatchesBasic() {
         MatchEngine engine = new MatchEngine();
@@ -284,5 +288,189 @@ public class MainTest {
         assertEquals(1, matches.size());
         assertTrue(matches.get(0).snippet().length() <= 120);
         assertTrue(matches.get(0).snippet().endsWith("..."));
+    }
+
+    @Test
+    public void testFindLineMatchesNoMatches() {
+        MatchEngine engine = new MatchEngine();
+        List<FileMatch> matches = Main.findLineMatches("no keyword here\nneither does this", "fox", "default", engine);
+        assertTrue(matches.isEmpty());
+    }
+
+    @Test
+    public void testFindLineMatchesEmptyText() {
+        assertTrue(Main.findLineMatches("", "fox", "default", new MatchEngine()).isEmpty());
+    }
+
+    @Test
+    public void testFindLineMatchesNullText() {
+        assertTrue(Main.findLineMatches(null, "fox", "default", new MatchEngine()).isEmpty());
+    }
+
+    @Test
+    public void testFindLineMatchesFirstLine() {
+        // Line numbers are 1-indexed; a match on the very first line must be l.1
+        MatchEngine engine = new MatchEngine();
+        List<FileMatch> matches = Main.findLineMatches("fox is first\nsecond line", "fox", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(1, matches.get(0).line());
+        assertEquals(0, matches.get(0).page()); // no page structure
+    }
+
+    @Test
+    public void testFindLineMatchesCaseInsensitiveDefault() {
+        MatchEngine engine = new MatchEngine();
+        String text = "Fox is upper\nfox is lower\nFOX is all caps";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        assertEquals(3, matches.size());
+    }
+
+    @Test
+    public void testFindLineMatchesExactModeIsCaseSensitive() {
+        MatchEngine engine = new MatchEngine();
+        String text = "Fox is upper\nfox is lower\nFOX is all caps";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "exact", engine);
+        // Only the exact-case "fox" matches
+        assertEquals(1, matches.size());
+        assertEquals(2, matches.get(0).line());
+    }
+
+    @Test
+    public void testFindLineMatchesFuzzyMode() {
+        MatchEngine engine = new MatchEngine();
+        String text = "nothing here\ncafe keyword present\nstill nothing";
+        List<FileMatch> matches = Main.findLineMatches(text, "café", "fuzzy", engine);
+        assertEquals(1, matches.size());
+        assertEquals(2, matches.get(0).line());
+    }
+
+    @Test
+    public void testFindLineMatchesWindowsLineEndings() {
+        // \r\n must be treated as a single newline, keeping line numbers correct
+        MatchEngine engine = new MatchEngine();
+        String text = "line one\r\nfox here\r\nline three";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(2, matches.get(0).line());
+        assertEquals("fox here", matches.get(0).snippet());
+    }
+
+    @Test
+    public void testFindLineMatchesCarriageReturnOnlyLineEndings() {
+        // Old Mac-style \r-only endings must also be normalised
+        MatchEngine engine = new MatchEngine();
+        String text = "line one\rfox here\rline three";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(2, matches.get(0).line());
+    }
+
+    @Test
+    public void testFindLineMatchesLineNumbersResetPerPage() {
+        // Line numbers restart at 1 on each page
+        MatchEngine engine = new MatchEngine();
+        String text = "p1 line1\np1 line2\np1 fox line3\fp2 line1\np2 fox line2";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        assertEquals(2, matches.size());
+        assertEquals(1, matches.get(0).page());
+        assertEquals(3, matches.get(0).line());
+        assertEquals(2, matches.get(1).page());
+        assertEquals(2, matches.get(1).line());
+    }
+
+    @Test
+    public void testFindLineMatchesPageNumbersIncrement() {
+        // Matches on page 2 and page 4 must reflect correct page numbers
+        MatchEngine engine = new MatchEngine();
+        String text = "p1\ffox on p2\fno match\ffox on p4";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        assertEquals(2, matches.size());
+        assertEquals(2, matches.get(0).page());
+        assertEquals(4, matches.get(1).page());
+    }
+
+    @Test
+    public void testFindLineMatchesSnippetAt120NotTruncated() {
+        MatchEngine engine = new MatchEngine();
+        String line = "fox " + "x".repeat(116); // exactly 120 chars after trim
+        List<FileMatch> matches = Main.findLineMatches(line, "fox", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(120, matches.get(0).snippet().length());
+        assertFalse(matches.get(0).snippet().endsWith("..."));
+    }
+
+    @Test
+    public void testFindLineMatchesSnippetAt121IsTruncatedTo120() {
+        MatchEngine engine = new MatchEngine();
+        String line = "fox " + "x".repeat(117); // 121 chars — must truncate
+        List<FileMatch> matches = Main.findLineMatches(line, "fox", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(120, matches.get(0).snippet().length());
+        assertTrue(matches.get(0).snippet().endsWith("..."));
+    }
+
+    @Test
+    public void testFindLineMatchesTotalCountSumsAcrossLines() {
+        MatchEngine engine = new MatchEngine();
+        String text = "fox fox\nfox\nno match\nfox fox fox";
+        List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
+        int total = matches.stream().mapToInt(FileMatch::count).sum();
+        assertEquals(6, total);
+        assertEquals(3, matches.size()); // 3 lines have at least one match
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // CliOptions — --file flag, regressions
+    // ────────────────────────────────────────────────────────────────
+
+    @Test
+    public void testFileOptionLongFlag() {
+        String[] args = {"--file", "/tmp/test.pdf", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertEquals("/tmp/test.pdf", options.getFile());
+        assertNull(options.getUrl());
+    }
+
+    @Test
+    public void testGetFileIsNullInUrlMode() {
+        // Existing URL mode must not accidentally expose a file path
+        String[] args = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertNull(options.getFile());
+    }
+
+    @Test
+    public void testFileModeAcceptsMatchModeOption() {
+        String[] args = {"-f", "/tmp/test.pdf", "-k", "test", "-m", "exact"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate(); // must not throw
+        assertEquals("exact", options.getMode());
+    }
+
+    @Test
+    public void testFileModeAcceptsJsonOutput() {
+        String[] args = {"-f", "/tmp/test.pdf", "-k", "test", "-o", "json"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate(); // must not throw
+        assertEquals("json", options.getOutput());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testFileModeRejectsInvalidMatchMode() {
+        String[] args = {"-f", "/tmp/test.pdf", "-k", "test", "-m", "invalid"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+    }
+
+    @Test
+    public void testUrlModeValidationUnchangedAfterFileFeature() {
+        // The URL validation path must still work exactly as before
+        String[] args = {"-u", "http://example.com", "-k", "test", "-d", "3", "-m", "fuzzy"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals("http://example.com", options.getUrl());
+        assertEquals(3, options.getDepth());
+        assertEquals("fuzzy", options.getMode());
+        assertNull(options.getFile());
     }
 }
