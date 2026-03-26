@@ -275,6 +275,26 @@ mvn package
 ```
 Produces `target/WebGrep-1.0.0.jar` — a self-contained fat JAR with all dependencies included. No additional installation required.
 
+### Docker
+No Java installation required. Build the image once from the provided `Dockerfile`:
+```bash
+docker build -t webgrep .
+```
+
+Then run any mode using `docker run`:
+```bash
+# Web crawl
+docker run --rm webgrep -u https://example.com -k domain
+
+# Local file — mount the file into the container under /data
+docker run --rm -v /path/to/file.pdf:/data/file.pdf webgrep -f /data/file.pdf -k revenue
+
+# Local folder — mount the folder into the container under /data
+docker run --rm -v /path/to/documents:/data webgrep -F /data -k confidential
+```
+
+The image uses a multi-stage build: Maven compiles the JAR in a build stage, and only the lightweight Alpine JRE is included in the final image (~90 MB).
+
 ---
 
 Written by and belongs to Simon D.  
