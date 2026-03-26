@@ -1,28 +1,43 @@
 # WebGrep
 
-WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes support Apache Tika text extraction from **PDF, DOCX, TXT, and 100+ other formats**, and report exact page and line numbers for every match.
+WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website and its linked documents), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes use Apache Tika for text extraction from **PDF, DOCX, TXT, and 100+ other formats**, and report exact page and line numbers for every match.
 
 **Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), JUnit 4 (tests).
 
 ![WebGrep demo](images/demo.gif)
 
-### Architecture
-WebGrep is designed with a modular architecture for high performance and maintainability:
-- **CliOptions**: Handles advanced argument parsing and strict input validation. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
-- **Crawler**: Manages the multi-level crawl queue, domain constraints, body size limits, and configurable politeness delays. Maintains a session cookie jar across all requests, and automatically retries on HTTP 429 (rate limited) with exponential backoff before giving up. Displays a live progress indicator during the crawl.
-- **ContentExtractor**: Orchestrates intelligent text extraction from HTML pages (via Jsoup) and binary documents like PDF/DOCX (via Apache Tika), with a 30-second timeout per document to prevent hangs on corrupt or oversized files.
-- **MatchEngine**: Executes pluggable matching strategies including case-insensitive, exact, and fuzzy (Levenshtein) searches with full Unicode and diacritic support. Regex patterns are cached per run for performance.
-- **ReportWriter**: Generates human-readable text summaries or structured JSON for automation. Covers all three input modes (web crawl, single file, folder scan).
+---
 
-### Depth Definition
-- **Depth 0**: Fetches and searches only the provided seed URL. No links are followed.
-- **Depth 1**: Fetches the seed URL, then follows all links found on that page (HTML links, PDF links, document links, etc.).
-- **Depth N**: Continues recursively, following links up to N hops from the seed.
+## Getting Started
 
-Each URL is visited at most once per run. By default, URLs that look like navigation variants of an already-visited page are skipped: if `list?id=1` was visited, then `list?id=1&sort=asc` is treated as a variant and skipped — but `list?id=2` has a different value and is treated as new content. Use `--all-urls` to disable this.
+### Option 1 — Native JAR (requires Java 17+)
+```bash
+mvn package
+java -jar target/WebGrep-1.0.0.jar -u https://example.com -k "your keyword"
+```
 
-### Usage
-WebGrep has three input modes. Exactly one must be specified:
+### Option 2 — Docker (no Java required)
+```bash
+docker build -t webgrep .
+docker run --rm webgrep -u https://example.com -k "your keyword"
+```
+
+For local files and folders, mount the host path into the container:
+```bash
+# Single file
+docker run --rm -v /path/to/file.pdf:/data/file.pdf webgrep -f /data/file.pdf -k revenue
+
+# Entire folder
+docker run --rm -v /path/to/documents:/data webgrep -F /data -k confidential
+```
+
+The Docker image uses a multi-stage build — Maven compiles the JAR in the build stage, only the lightweight Alpine JRE is included in the final image (~90 MB).
+
+---
+
+## Usage
+
+WebGrep has three input modes. Exactly one must be specified per run:
 
 ```bash
 # Web crawl mode
@@ -35,41 +50,55 @@ java -jar WebGrep.jar -f <path> -k <keyword> [options]
 java -jar WebGrep.jar -F <path> -k <keyword> [options]
 ```
 
-#### Options:
+### Options
 
 **Input (exactly one required):**
 - `-u, --url <URL>`: The starting URL for a web crawl.
-- `-f, --file <path>`: Search a single local file instead of crawling the web. Supports all formats that Apache Tika understands (PDF, DOCX, TXT, and more).
-- `-F, --folder <path>`: Recursively search all files in a local directory. Each file is scanned independently; results are grouped by file.
+- `-f, --file <path>`: Search a single local file. Supports all formats Apache Tika understands (PDF, DOCX, TXT, and more).
+- `-F, --folder <path>`: Recursively search all files in a local directory. Results are grouped by file.
 
 **Matching:**
 - `-k, --keyword <word>`: The keyword to search for (required).
-- `-m, --mode <mode>`: Match strategy (`default`, `exact`, `fuzzy`).
+- `-m, --mode <mode>`: Match strategy: `default`, `exact`, or `fuzzy`.
 
 **Web crawl controls:**
-- `-d, --depth <n>`: Maximum crawl depth (default: 1).
+- `-d, --depth <n>`: Maximum crawl depth (default: 1). See [Depth Definition](#depth-definition) below.
 - `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-n, --max-hits <n>`: Stop crawling as soon as n total matches have been found (default: 0 = no limit). Pairs well with `--dfs` to surface deeply buried results quickly, or with BFS (default) to find the first N most prominent matches.
-- `-a, --all-urls`: Disable smart URL deduplication. By default, if `page?id=1` was visited, `page?id=1&sort=asc` is treated as a navigation variant and skipped. Use this flag to visit every URL regardless — useful when you want all sort/filter/pagination variants crawled.
-- `-s, --dfs`: Use depth-first search instead of the default breadth-first search. BFS explores the site level by level (all pages at depth 1 before depth 2); DFS follows each link chain as deep as possible before backtracking. DFS can find deeply buried documents faster; BFS gives more representative coverage of the whole site.
-- `-e, --allow-external`: Allow the crawler to follow links outside the starting domain.
-- `-i, --insecure`: Disable SSL certificate verification. Use with caution — this bypasses all TLS validation.
+- `-n, --max-hits <n>`: Stop as soon as N total matches are found (default: 0 = no limit). Pairs well with `--dfs` to surface deeply buried results quickly, or with BFS (default) to find the first N most prominent matches.
+- `-a, --all-urls`: Disable smart URL deduplication. By default, `page?id=1&sort=asc` is treated as a variant of `page?id=1` and skipped. Use this flag to visit every URL regardless.
+- `-s, --dfs`: Use depth-first search instead of the default breadth-first. BFS covers the site level by level; DFS follows each link chain as deep as possible before backtracking.
+- `-e, --allow-external`: Follow links outside the starting domain.
+- `-i, --insecure`: Disable SSL certificate verification. Use with caution.
 
 **General:**
-- `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to both web downloads and local files.
-- `-o, --output <format>`: Output format (`text` or `json`).
+- `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to web downloads and local files.
+- `-o, --output <format>`: Output format: `text` (default) or `json`.
 - `-h, --help`: Show help message.
 
 ### Matching Modes
-- **Default**: Case-insensitive matching with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. If no direct match is found, a simplified (diacritic-stripped, punctuation-removed) fallback pass is attempted.
-- **Exact**: Strict case-sensitive literal matching. `hello` does not match `Hello`.
-- **Fuzzy**: First tries a normalized (diacritic-stripped, punctuation-removed) substring match. If nothing is found, splits the text into words and accepts any word within a Levenshtein edit distance of 1 (for keywords of 4 characters or fewer) or 2 (for longer keywords). This catches common typos and minor spelling variations.
 
-### Examples
+- **Default**: Case-insensitive with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. If no direct match is found, a diacritic-stripped, punctuation-removed fallback pass is attempted.
+- **Exact**: Strict case-sensitive literal match. `hello` does not match `Hello`.
+- **Fuzzy**: First tries a normalised substring match. If that fails, splits the text into words and accepts any word within Levenshtein edit distance 1 (for keywords ≤ 4 characters) or 2 (for longer keywords). Catches common typos and spelling variants.
 
-#### Web Crawl
+### Depth Definition
+
+Applies to web crawl mode only.
+
+- **Depth 0**: Fetches and searches only the seed URL. No links are followed.
+- **Depth 1**: Fetches the seed URL, then follows all links found on that page.
+- **Depth N**: Continues recursively, following links up to N hops from the seed.
+
+Each URL is visited at most once per run. By default, URLs that look like navigation variants of an already-visited page are skipped — `list?id=1&sort=asc` is treated as a variant of `list?id=1`, but `list?id=2` is treated as new content. Use `--all-urls` to disable this.
+
+---
+
+## Examples
+
+### Web Crawl
+
 **Basic search:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k domain
@@ -80,7 +109,7 @@ java -jar WebGrep.jar -u https://example.com -k domain
 java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2
 ```
 
-**Search directly inside a PDF:**
+**Search directly inside a remote PDF:**
 ```bash
 java -jar WebGrep.jar -u https://example.com/report.pdf -k "revenue" -d 0
 ```
@@ -90,7 +119,7 @@ java -jar WebGrep.jar -u https://example.com/report.pdf -k "revenue" -d 0
 java -jar WebGrep.jar -u https://example.com -k domain -o json
 ```
 
-**Fast crawl with no delay between requests:**
+**Fast crawl with no delay:**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 ```
@@ -100,7 +129,7 @@ java -jar WebGrep.jar -u https://example.com -k topic -d 2 -r 0
 java -jar WebGrep.jar -u https://example.com/listings -k topic -d 1 --all-urls
 ```
 
-**Stop after the first 5 matches (BFS — finds most prominent results first):**
+**Stop after the first 5 matches (BFS — most prominent results first):**
 ```bash
 java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2 -n 5
 ```
@@ -110,8 +139,9 @@ java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2 -n 5
 java -jar WebGrep.jar -u https://example.com -k "annual report" -d 3 -s -n 5
 ```
 
-#### Local File
-**Search a plain text or PDF file:**
+### Local File
+
+**Search a PDF or plain text file:**
 ```bash
 java -jar WebGrep.jar -f /path/to/report.pdf -k "revenue"
 ```
@@ -121,43 +151,50 @@ java -jar WebGrep.jar -f /path/to/report.pdf -k "revenue"
 java -jar WebGrep.jar -f /path/to/contract.docx -k "Clause 4.2" -m exact
 ```
 
-**JSON output from a local file:**
+**JSON output:**
 ```bash
 java -jar WebGrep.jar -f /path/to/report.pdf -k "revenue" -o json
 ```
 
-#### Local Folder
+### Local Folder
+
 **Search all files in a folder recursively:**
 ```bash
 java -jar WebGrep.jar -F /path/to/documents -k "confidential"
 ```
 
-**Search with a file size limit (skip files larger than 5 MB):**
+**Skip files larger than 5 MB:**
 ```bash
 java -jar WebGrep.jar -F /path/to/documents -k "invoice" -b 5242880
 ```
 
-**JSON output from a folder scan:**
+**JSON output:**
 ```bash
 java -jar WebGrep.jar -F /path/to/documents -k "confidential" -o json
 ```
 
-### Document Support
-All three input modes use Apache Tika for text extraction. Supported formats include:
+---
+
+## Document Support
+
+All three modes use Apache Tika for text extraction. Supported formats include:
+
 - **PDF** (`.pdf`)
 - **Word** (`.doc`, `.docx`)
 - **Plain text** (`.txt`)
 - **And many more** — Tika supports 100+ formats including ODT, RTF, EPUB, XLS, XLSX, PPT, PPTX, and more.
 
-Each document is parsed with a **30-second timeout** per file. If parsing takes longer (e.g. a corrupt or malformed file), it is skipped and the raw bytes are used as a UTF-8 fallback.
+Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. a corrupt or malformed file), it is skipped and the raw bytes are used as a UTF-8 fallback.
 
-**Web crawl mode:** only files whose URL passes the link filter are fetched — static assets (images, video, CSS, JS, fonts, archives, social share links) are skipped before any request is made.
+**Web crawl mode:** static assets (images, video, CSS, JS, fonts, archives, social share links) are filtered by URL before any request is made.
 
-**File and folder modes:** every file in the given path is passed to Tika regardless of extension. Files exceeding `--max-bytes` are skipped and counted in the summary.
+**File and folder modes:** every file is passed to Tika regardless of extension. Files exceeding `--max-bytes` are skipped and counted in the summary.
 
-### Sample Output (JSON)
+---
 
-#### Web Crawl
+## Sample Output (JSON)
+
+### Web Crawl
 ```json
 {
   "query": {
@@ -188,7 +225,7 @@ Each document is parsed with a **30-second timeout** per file. If parsing takes 
 }
 ```
 
-#### Local File
+### Local File
 ```json
 {
   "query": {
@@ -209,7 +246,7 @@ Each document is parsed with a **30-second timeout** per file. If parsing takes 
 
 > For plain text files (no page structure), the `page` field is omitted from each match object.
 
-#### Local Folder
+### Local Folder
 ```json
 {
   "query": {
@@ -244,59 +281,45 @@ Each document is parsed with a **30-second timeout** per file. If parsing takes 
 }
 ```
 
-#### JSON Fields Reference
+### JSON Fields Reference
 | Field | Meaning |
 |---|---|
 | `stats.duration_ms` | Wall-clock time for the entire run in milliseconds |
-| `stats.docs_parsed` | *(web crawl)* Number of binary documents (PDF, DOCX, etc.) parsed during the crawl |
-| `stopped_early` | *(web crawl)* Present only when `--max-hits` triggered an early exit; describes the limit reached |
-| `stats.errors.network_error` | *(web crawl)* Request failed (DNS failure, connection refused, timeout, non-403/429 HTTP error) |
-| `stats.errors.network_error_reasons` | *(web crawl)* Breakdown of network errors by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
-| `stats.errors.blocked` | *(web crawl)* Server returned 403 or 429, or a bot-protection challenge was detected |
-| `stats.errors.skipped_size` | *(web crawl)* File exceeded `--max-bytes` and was not parsed |
-| `stats.errors.parse_error` | Reserved for future use |
-| `stats.errors.skipped_type` | Reserved for future use |
+| `stats.docs_parsed` | *(web crawl)* Binary documents (PDF, DOCX, etc.) parsed during the crawl |
+| `stopped_early` | *(web crawl)* Present only when `--max-hits` triggered an early stop |
+| `stats.errors.network_error` | *(web crawl)* Requests that failed (DNS, timeout, connection refused, non-403/429 HTTP errors) |
+| `stats.errors.network_error_reasons` | *(web crawl)* Breakdown by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
+| `stats.errors.blocked` | *(web crawl)* Pages returning 403/429 or detected bot-protection challenges |
+| `stats.errors.skipped_size` | *(web crawl)* Files that exceeded `--max-bytes` and were not parsed |
 | `stats.files_skipped` | *(folder)* Files that exceeded `--max-bytes` and were not scanned |
-| `matches[].page` | *(file/folder)* Page number (1-based); omitted for plain-text files with no page structure |
+| `matches[].page` | *(file/folder)* Page number (1-based); omitted when the file has no page structure |
 | `matches[].line` | *(file/folder)* Line number within the page (1-based) |
-| `matches[].count` | *(file/folder)* Number of keyword occurrences on that line |
+| `matches[].count` | *(file/folder)* Keyword occurrences on that line |
 | `matches[].snippet` | *(file/folder)* Trimmed line content, truncated to 120 characters |
-
-### Limitations
-- **JavaScript**: WebGrep processes static HTML only. It does not execute JavaScript. Pages that render content client-side (SPAs) may not be fully indexed.
-- **Bot Protection**: JavaScript-based challenges (e.g. Cloudflare Managed Challenges) cannot be bypassed. They are detected by known challenge page signatures and reported under `blocked`.
-- **Robots.txt**: The tool does not parse `robots.txt`. Use `--delay-ms` to be polite to servers.
-- **Authentication**: No support for login sessions or HTTP Basic Auth. Session cookies set by the server are automatically maintained across requests, but authenticated areas requiring a login form cannot be accessed.
-
-### Build
-Requires Java 17+ and Maven.
-```bash
-mvn package
-```
-Produces `target/WebGrep-1.0.0.jar` — a self-contained fat JAR with all dependencies included. No additional installation required.
-
-### Docker
-No Java installation required. Build the image once from the provided `Dockerfile`:
-```bash
-docker build -t webgrep .
-```
-
-Then run any mode using `docker run`:
-```bash
-# Web crawl
-docker run --rm webgrep -u https://example.com -k domain
-
-# Local file — mount the file into the container under /data
-docker run --rm -v /path/to/file.pdf:/data/file.pdf webgrep -f /data/file.pdf -k revenue
-
-# Local folder — mount the folder into the container under /data
-docker run --rm -v /path/to/documents:/data webgrep -F /data -k confidential
-```
-
-The image uses a multi-stage build: Maven compiles the JAR in a build stage, and only the lightweight Alpine JRE is included in the final image (~90 MB).
 
 ---
 
-Written by and belongs to Simon D.  
-Free to use for personal and educational purposes.  
-For commercial use please contact me at simon.d.dev@proton.me.  
+## Architecture
+
+WebGrep is designed with a modular architecture for performance and maintainability:
+
+- **CliOptions**: Parses and validates all command-line arguments. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
+- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl.
+- **ContentExtractor**: Extracts searchable text from HTML pages via Jsoup, and from binary documents via Apache Tika with a 30-second timeout per file to prevent hangs on corrupt or oversized content.
+- **MatchEngine**: Pluggable matching strategies (case-insensitive, exact, fuzzy/Levenshtein) with full Unicode and diacritic support. Compiled regex patterns are cached per keyword/mode pair for performance.
+- **ReportWriter**: Renders results as human-readable text or structured JSON. Covers all three input modes.
+
+---
+
+## Limitations
+
+- **JavaScript**: WebGrep processes static HTML only. Pages that render content client-side (SPAs) may not be fully indexed.
+- **Bot Protection**: JavaScript-based challenges (e.g. Cloudflare Managed Challenges) cannot be bypassed. They are detected and reported under `blocked`.
+- **Robots.txt**: Not parsed. Use `--delay-ms` to be polite to servers.
+- **Authentication**: No support for login forms or HTTP Basic Auth. Session cookies set by the server are maintained across requests automatically.
+
+---
+
+Written by and belongs to Simon D.
+Free to use for personal and educational purposes.
+For commercial use please contact me at simon.d.dev@proton.me.
