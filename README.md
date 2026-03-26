@@ -320,6 +320,6 @@ WebGrep is designed with a modular architecture for performance and maintainabil
 
 ---
 
-Written by and belongs to Simon D.
-Free to use for personal and educational purposes.
-For commercial use please contact me at simon.d.dev@proton.me.
+Written by and belongs to Simon D.  
+Free to use for personal and educational purposes.  
+For commercial use please contact me at simon.d.dev@proton.me.  
