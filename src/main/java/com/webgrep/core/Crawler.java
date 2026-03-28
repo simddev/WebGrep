@@ -52,6 +52,7 @@ public class Crawler {
     private final boolean allowSubdomains;
     private final int maxBodySize;
     private final UrlDeduplicator dedup;
+    private final SSLSocketFactory insecureSslFactory;
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
         this.options = options;
@@ -65,7 +66,12 @@ public class Crawler {
         this.dedup = new UrlDeduplicator(options.isAllUrls());
 
         if (options.isInsecure()) {
-            setupSsl();
+            this.insecureSslFactory = buildInsecureSslFactory();
+            // Jsoup has no per-connection hostname verifier API; this global setter is the
+            // minimal remaining side effect of --insecure. It only runs when explicitly requested.
+            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+        } else {
+            this.insecureSslFactory = null;
         }
     }
 
@@ -211,7 +217,7 @@ public class Crawler {
     private org.jsoup.Connection.Response fetchWithRetry(String url) throws Exception {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                return Jsoup.connect(url)
+                org.jsoup.Connection conn = Jsoup.connect(url)
                         .timeout(options.getTimeoutMs())
                         .maxBodySize(maxBodySize)
                         .followRedirects(true)
@@ -219,8 +225,9 @@ public class Crawler {
                         .cookies(cookieJar)
                         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                         .header("Accept-Language", "en-US,en;q=0.9,bs;q=0.8,sr;q=0.7,hr;q=0.6")
-                        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-                        .execute();
+                        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+                if (insecureSslFactory != null) conn.sslSocketFactory(insecureSslFactory);
+                return conn.execute();
             } catch (org.jsoup.HttpStatusException e) {
                 if (e.getStatusCode() == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
                     long waitMs = 1000L << attempt; // 2s, 4s
@@ -236,7 +243,7 @@ public class Crawler {
         throw new IllegalStateException("unreachable");
     }
 
-    private void setupSsl() {
+    private SSLSocketFactory buildInsecureSslFactory() {
         try {
             TrustManager[] trustAllCerts = new TrustManager[]{
                 new X509TrustManager() {
@@ -247,10 +254,10 @@ public class Crawler {
             };
             SSLContext sc = SSLContext.getInstance("SSL");
             sc.init(null, trustAllCerts, new SecureRandom());
-            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+            return sc.getSocketFactory();
         } catch (Exception e) {
-            System.err.println("Warning: failed to disable SSL verification — " + e.getMessage());
+            System.err.println("Warning: failed to configure insecure SSL — " + e.getMessage());
+            return null;
         }
     }
 

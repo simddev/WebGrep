@@ -2,6 +2,7 @@ package com.webgrep.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Parses and validates all command-line options accepted by WebGrep.
@@ -18,6 +19,12 @@ import java.util.Map;
  * before passing the options to other components.
  */
 public class CliOptions {
+    private static final Set<String> KNOWN_FLAGS = Set.of(
+        "url", "file", "folder", "keyword", "depth", "mode", "max-pages", "max-bytes",
+        "timeout-ms", "delay-ms", "max-hits", "allow-external", "insecure", "all-urls",
+        "dfs", "output", "help"
+    );
+
     private String url;
     private String file;
     private String folder;
@@ -47,10 +54,14 @@ public class CliOptions {
 
             if (arg.startsWith("--")) {
                 key = arg.substring(2);
+                if (!KNOWN_FLAGS.contains(key))
+                    throw new IllegalArgumentException("Unknown option: --" + key);
                 hasValue = isValuedFlag(key);
             } else if (arg.startsWith("-") && arg.length() == 2) {
                 char shortFlag = arg.charAt(1);
                 key = mapShortFlag(shortFlag);
+                if (key == null)
+                    throw new IllegalArgumentException("Unknown option: -" + shortFlag);
                 hasValue = isValuedFlag(key);
             }
 
