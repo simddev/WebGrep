@@ -46,9 +46,9 @@ public class Main {
                 FolderScan scan = scanFolder(options, extractor, matchEngine);
                 long durationMs = System.currentTimeMillis() - startTime;
                 if ("json".equals(options.getOutput())) {
-                    reportWriter.printFolderJsonOutput(options, scan.results(), scan.scanned(), scan.skipped(), durationMs);
+                    reportWriter.printFolderJsonOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), durationMs);
                 } else {
-                    reportWriter.printFolderTextOutput(options, scan.results(), scan.scanned(), scan.skipped(), durationMs);
+                    reportWriter.printFolderTextOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), durationMs);
                 }
             } else if (options.getFile() != null) {
                 List<FileMatch> fileMatches = scanLocalFile(options, extractor, matchEngine);
@@ -86,7 +86,7 @@ public class Main {
         }
     }
 
-    private record FolderScan(List<FileScanResult> results, int scanned, int skipped) {}
+    private record FolderScan(List<FileScanResult> results, int scanned, int skipped, int failed) {}
 
     private static FolderScan scanFolder(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
             throws Exception {
@@ -100,7 +100,7 @@ public class Main {
         }
 
         List<FileScanResult> results = new ArrayList<>();
-        int scanned = 0, skipped = 0;
+        int scanned = 0, skipped = 0, failed = 0;
 
         for (Path path : files) {
             if (path.toFile().length() > options.getMaxBytes()) {
@@ -116,12 +116,12 @@ public class Main {
                 if (!matches.isEmpty()) {
                     results.add(new FileScanResult(path.toString(), matches));
                 }
-            } catch (Exception ignored) {
-                // unreadable file — skip silently
+            } catch (Exception e) {
+                failed++;
             }
         }
         System.err.print("\r" + " ".repeat(100) + "\r");
-        return new FolderScan(results, scanned, skipped);
+        return new FolderScan(results, scanned, skipped, failed);
     }
 
     private static List<FileMatch> scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)

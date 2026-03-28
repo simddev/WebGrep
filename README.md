@@ -258,6 +258,7 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
     "duration_ms": 312,
     "files_scanned": 5,
     "files_skipped": 1,
+    "files_failed": 0,
     "files_with_matches": 2,
     "total_matches": 4
   },
@@ -292,6 +293,7 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 | `stats.errors.blocked` | *(web crawl)* Pages returning 403/429 or detected bot-protection challenges |
 | `stats.errors.skipped_size` | *(web crawl)* Files that exceeded `--max-bytes` and were not parsed |
 | `stats.files_skipped` | *(folder)* Files that exceeded `--max-bytes` and were not scanned |
+| `stats.files_failed` | *(folder)* Files that could not be read or parsed (permission error, corrupt file, etc.) |
 | `matches[].page` | *(file/folder)* Page number (1-based); omitted when the file has no page structure |
 | `matches[].line` | *(file/folder)* Line number within the page (1-based) |
 | `matches[].count` | *(file/folder)* Keyword occurrences on that line |

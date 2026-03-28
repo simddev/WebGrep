@@ -549,4 +549,28 @@ public class MainTest {
         CliOptions options = CliOptions.parse(args);
         assertNull(options.getFolder());
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // CliOptions — unknown flag rejection
+    // ────────────────────────────────────────────────────────────────
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testUnknownLongFlagIsRejected() {
+        CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "--typo-flag"});
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testUnknownShortFlagIsRejected() {
+        CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "-Z"});
+    }
+
+    @Test
+    public void testUnknownFlagErrorMessageNamesFlagClearly() {
+        try {
+            CliOptions.parse(new String[]{"--no-such-flag", "-k", "test"});
+            fail("Expected IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("--no-such-flag"));
+        }
+    }
 }

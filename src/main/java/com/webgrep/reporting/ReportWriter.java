@@ -147,7 +147,7 @@ public class ReportWriter {
     }
 
     public void printFolderTextOutput(CliOptions options, List<FileScanResult> results,
-                                      int filesScanned, int filesSkipped, long durationMs) {
+                                      int filesScanned, int filesSkipped, int filesFailed, long durationMs) {
         int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
 
         System.out.println("--- WebGrep Results ---");
@@ -156,6 +156,8 @@ public class ReportWriter {
         System.out.println("Files scanned: " + filesScanned);
         if (filesSkipped > 0)
             System.out.println("  Skipped (too large): " + filesSkipped);
+        if (filesFailed > 0)
+            System.out.println("  Failed (unreadable): " + filesFailed);
         System.out.println("  With matches: " + results.size());
         System.out.println("Total matches found: " + totalMatches);
 
@@ -176,7 +178,7 @@ public class ReportWriter {
     }
 
     public void printFolderJsonOutput(CliOptions options, List<FileScanResult> results,
-                                      int filesScanned, int filesSkipped, long durationMs) {
+                                      int filesScanned, int filesSkipped, int filesFailed, long durationMs) {
         int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
 
         StringBuilder json = new StringBuilder();
@@ -190,6 +192,7 @@ public class ReportWriter {
         json.append("    \"duration_ms\": ").append(durationMs).append(",\n");
         json.append("    \"files_scanned\": ").append(filesScanned).append(",\n");
         json.append("    \"files_skipped\": ").append(filesSkipped).append(",\n");
+        json.append("    \"files_failed\": ").append(filesFailed).append(",\n");
         json.append("    \"files_with_matches\": ").append(results.size()).append(",\n");
         json.append("    \"total_matches\": ").append(totalMatches).append("\n");
         json.append("  },\n");

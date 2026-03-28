@@ -310,7 +310,7 @@ public class ReportWriterTest {
     @Test
     public void testFolderTextOutputNoMatches() {
         new ReportWriter().printFolderTextOutput(
-                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 200);
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 0, 200);
         String output = out.toString();
         assertTrue(output.contains("--- WebGrep Results ---"));
         assertTrue(output.contains("Folder: /tmp/docs"));
@@ -323,14 +323,14 @@ public class ReportWriterTest {
     @Test
     public void testFolderTextOutputSkippedFilesShownWhenNonZero() {
         new ReportWriter().printFolderTextOutput(
-                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 2, 100);
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 2, 0, 100);
         assertTrue(out.toString().contains("Skipped (too large): 2"));
     }
 
     @Test
     public void testFolderTextOutputSkippedFilesHiddenWhenZero() {
         new ReportWriter().printFolderTextOutput(
-                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 0, 100);
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 3, 0, 0, 100);
         assertFalse(out.toString().contains("Skipped"));
     }
 
@@ -343,7 +343,7 @@ public class ReportWriterTest {
                         new FileMatch(2, 1, 2, "fox fox p2"))
         );
         new ReportWriter().printFolderTextOutput(
-                folderOpts("/tmp/docs", "fox"), results, 10, 0, 500);
+                folderOpts("/tmp/docs", "fox"), results, 10, 0, 0, 500);
         String output = out.toString();
 
         assertTrue(output.contains("Total matches found: 4")); // 1+1+2
@@ -362,7 +362,7 @@ public class ReportWriterTest {
                 fileResult("/tmp/f.txt", new FileMatch(0, 5, 1, "match"))
         );
         new ReportWriter().printFolderTextOutput(
-                folderOpts("/tmp", "x"), results, 1, 0, 50);
+                folderOpts("/tmp", "x"), results, 1, 0, 0, 50);
         assertFalse("Page column must not appear when all page=0", out.toString().contains("p."));
     }
 
@@ -374,7 +374,7 @@ public class ReportWriterTest {
                 fileResult("/tmp/docs/a.txt", new FileMatch(0, 2, 3, "triple fox"))
         );
         new ReportWriter().printFolderJsonOutput(
-                folderOpts("/tmp/docs", "fox"), results, 7, 1, 300);
+                folderOpts("/tmp/docs", "fox"), results, 7, 1, 0, 300);
         String json = out.toString();
 
         assertTrue(json.contains("\"folder\": \"/tmp/docs\""));
@@ -398,7 +398,7 @@ public class ReportWriterTest {
                 fileResult("/tmp/f.txt", new FileMatch(0, 1, 1, "snippet"))
         );
         new ReportWriter().printFolderJsonOutput(
-                folderOpts("/tmp", "x"), results, 1, 0, 50);
+                folderOpts("/tmp", "x"), results, 1, 0, 0, 50);
         assertFalse(out.toString().contains("\"page\""));
     }
 
@@ -410,7 +410,7 @@ public class ReportWriterTest {
                         new FileMatch(3, 4, 1, "p3"))
         );
         new ReportWriter().printFolderJsonOutput(
-                folderOpts("/tmp", "x"), results, 1, 0, 50);
+                folderOpts("/tmp", "x"), results, 1, 0, 0, 50);
         String json = out.toString();
         assertTrue(json.contains("\"page\": 1"));
         assertTrue(json.contains("\"page\": 3"));
@@ -419,11 +419,33 @@ public class ReportWriterTest {
     @Test
     public void testFolderJsonOutputEmptyResults() {
         new ReportWriter().printFolderJsonOutput(
-                folderOpts("/tmp/docs", "x"), Collections.emptyList(), 10, 2, 100);
+                folderOpts("/tmp/docs", "x"), Collections.emptyList(), 10, 2, 0, 100);
         String json = out.toString();
         assertTrue(json.contains("\"total_matches\": 0"));
         assertTrue(json.contains("\"files_with_matches\": 0"));
         assertTrue(json.contains("\"results\":"));
+    }
+
+    @Test
+    public void testFolderTextOutputShowsFailedFilesWhenNonZero() {
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 2, 100);
+        String output = out.toString();
+        assertTrue(output.contains("Failed (unreadable): 2"));
+    }
+
+    @Test
+    public void testFolderTextOutputHidesFailedLineWhenZero() {
+        new ReportWriter().printFolderTextOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 0, 100);
+        assertFalse(out.toString().contains("Failed"));
+    }
+
+    @Test
+    public void testFolderJsonOutputIncludesFilesFailed() {
+        new ReportWriter().printFolderJsonOutput(
+                folderOpts("/tmp/docs", "fox"), Collections.emptyList(), 5, 0, 3, 100);
+        assertTrue(out.toString().contains("\"files_failed\": 3"));
     }
 
     @Test
@@ -433,7 +455,7 @@ public class ReportWriterTest {
                 fileResult("/tmp/b.txt", new FileMatch(0, 3, 1, "bb"))
         );
         new ReportWriter().printFolderJsonOutput(
-                folderOpts("/tmp", "x"), results, 5, 0, 50);
+                folderOpts("/tmp", "x"), results, 5, 0, 0, 50);
         String json = out.toString();
         int posA = json.indexOf("/tmp/a.txt");
         int posB = json.indexOf("/tmp/b.txt");
