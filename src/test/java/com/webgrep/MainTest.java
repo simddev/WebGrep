@@ -555,6 +555,12 @@ public class MainTest {
     // ────────────────────────────────────────────────────────────────
 
     @Test(expected = IllegalArgumentException.class)
+    public void testBlankKeywordIsRejected() {
+        CliOptions options = CliOptions.parse(new String[]{"-f", "/tmp/test.pdf", "-k", "   "});
+        options.validate();
+    }
+
+    @Test(expected = IllegalArgumentException.class)
     public void testUnknownLongFlagIsRejected() {
         CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "--typo-flag"});
     }
