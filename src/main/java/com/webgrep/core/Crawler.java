@@ -53,6 +53,7 @@ public class Crawler {
     private final int maxBodySize;
     private final UrlDeduplicator dedup;
     private final SSLSocketFactory insecureSslFactory;
+    private final SpaApiAdapter spaAdapter = new SpaApiAdapter();
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
         this.options = options;
@@ -153,6 +154,18 @@ public class Crawler {
                     content = extractor.extractTextFromHtml(doc);
                     if (current.depth < options.getDepth()) {
                         links = extractor.extractLinks(doc, body, effectiveUrl);
+                    }
+
+                    if (spaAdapter.matches(effectiveUrl)) {
+                        SpaApiAdapter.SpaResult spaResult = spaAdapter.fetch(
+                                effectiveUrl, cookieJar, options.getTimeoutMs(),
+                                maxBodySize, insecureSslFactory);
+                        if (spaResult != null) {
+                            content = spaResult.text();
+                            if (current.depth < options.getDepth()) {
+                                links = new ArrayList<>(spaResult.links());
+                            }
+                        }
                     }
                 } else {
                     content = extractor.extractTextFromBinary(body, effectiveUrl, contentType);
