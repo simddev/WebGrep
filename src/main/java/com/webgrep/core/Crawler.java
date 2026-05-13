@@ -48,8 +48,8 @@ public class Crawler {
     private final CliOptions options;
     private final ContentExtractor extractor;
     private final MatchEngine matchEngine;
-    private final String startDomain;
-    private final boolean allowSubdomains;
+    private String startDomain;
+    private boolean allowSubdomains;
     private final int maxBodySize;
     private final UrlDeduplicator dedup;
     private final SSLSocketFactory insecureSslFactory;
@@ -121,6 +121,15 @@ public class Crawler {
                     }
 
                     crawlResult.visitedCount++;
+
+                    // If the seed URL permanently redirected to a different domain (e.g. an old
+                    // domain that migrated), switch domain scoping to the destination domain so
+                    // links on the new domain are followed rather than silently discarded.
+                    if (crawlResult.visitedCount == 1 && !isSameDomain(extractHost(effectiveUrl))) {
+                        String newHost = extractHost(effectiveUrl);
+                        startDomain = newHost.startsWith("www.") ? newHost.substring(4) : newHost;
+                        allowSubdomains = newHost.startsWith("www.");
+                    }
 
                     String contentLengthHeader = response.header("Content-Length");
                     if (contentLengthHeader != null) {
