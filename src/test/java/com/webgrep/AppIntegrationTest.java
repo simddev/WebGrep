@@ -251,4 +251,33 @@ public class AppIntegrationTest {
         assertTrue(output.contains("Skipped (too large): 1"));
         assertTrue(output.contains("Total matches found: 0"));
     }
+
+    @Test
+    public void testFileModeSkipsFileOverMaxBytes() throws Exception {
+        File tmp = File.createTempFile("webgrep-e2e-oversize", ".txt");
+        tmp.deleteOnExit();
+        Files.write(tmp.toPath(), "fox fox fox fox fox fox fox".getBytes());
+
+        Main.main(new String[]{"-f", tmp.getAbsolutePath(), "-k", "fox", "-b", "5"});
+        // File exceeds limit — skipped with warning to stderr; stdout reports 0 matches
+        assertTrue(out().contains("Total matches found: 0"));
+    }
+
+    @Test
+    public void testFolderModeStopsAtMaxHits() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-maxhits-e2e").toFile();
+        dir.deleteOnExit();
+        // Three files, each with 2 matches. --max-hits 3 should stop mid-scan.
+        Files.write(new File(dir, "a.txt").toPath(), "fox fox here".getBytes());
+        Files.write(new File(dir, "b.txt").toPath(), "fox fox here".getBytes());
+        Files.write(new File(dir, "c.txt").toPath(), "fox fox here".getBytes());
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox", "--max-hits", "3"});
+        String output = out();
+
+        assertTrue(output.contains("Note: Search stopped early"));
+        // With max-hits=3 and 2 matches per file, scan stops after at most 2 files
+        int total = Integer.parseInt(output.replaceAll("(?s).*Total matches found: (\\d+).*", "$1"));
+        assertTrue("Should have stopped before scanning all files", total <= 4);
+    }
 }

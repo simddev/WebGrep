@@ -2,7 +2,7 @@
 
 WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website and its linked documents), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes use Apache Tika for text extraction from **PDF, DOCX, TXT, and 100+ other formats**, and report exact page and line numbers for every match.
 
-**Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), JUnit 4 (tests).
+**Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), [Playwright for Java](https://playwright.dev/java/) (JavaScript rendering for SPA pages), JUnit 4 (tests).
 
 ![WebGrep demo](images/demo.gif)
 
@@ -13,7 +13,7 @@ WebGrep is a high-performance CLI keyword search tool with three modes: **web cr
 ### Option 1 — Native JAR (requires Java 17+)
 ```bash
 mvn package
-java -jar target/WebGrep-1.0.0.jar -u https://example.com -k "your keyword"
+java -jar target/WebGrep-1.1.0.jar -u https://example.com -k "your keyword"
 ```
 
 ### Option 2 — Docker (no Java required)
@@ -72,6 +72,10 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 - `-e, --allow-external`: Follow links outside the starting domain.
 - `-i, --insecure`: Disable SSL certificate verification. Use with caution.
 
+**SPA rendering:**
+- `--browser <type>`: Browser to use for JavaScript rendering: `auto` (default), `firefox`, or `chromium`. See [JavaScript-Rendered Pages](#javascript-rendered-pages-spas) below.
+- `--install-browser`: Pre-install a browser for SPA rendering and exit without crawling. Useful for one-time setup before running WebGrep in a non-interactive environment. Respects `--browser` preference.
+
 **General:**
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to web downloads and local files.
 - `-o, --output <format>`: Output format: `text` (default) or `json`.
@@ -95,6 +99,62 @@ Each URL is visited at most once per run. By default, URLs that look like naviga
 
 ---
 
+## JavaScript-Rendered Pages (SPAs)
+
+Many modern websites — government portals, dashboards, intranets — are built as **single-page applications** (Angular, React, Vue). Their content is injected into the page by JavaScript at runtime, which means a plain HTTP fetch returns an almost-empty HTML skeleton with no searchable text.
+
+WebGrep detects these pages automatically and, when one is encountered, asks whether you want to enable headless browser rendering for the session:
+
+```
+  The page at https://example.gov/portal
+  is a JavaScript-rendered single-page application (Angular, React, or Vue).
+  Its content is not visible in a plain HTML fetch and will return no results
+  without a headless browser.
+
+  WebGrep can render it automatically. A compatible browser will be used
+  if one is already installed; otherwise a one-time download (~105 MB) is
+  required.
+
+  Enable JavaScript rendering for this session? [Y/n]:
+```
+
+Answer **Y** (or just press Enter) to enable rendering. The choice applies for the rest of the crawl — you won't be asked again.
+
+### How the Browser Is Selected
+
+WebGrep works through the following tiers in order, using the first option that succeeds:
+
+1. **System Chromium or Chrome** — if already installed on your machine, WebGrep uses it silently. No download required.
+2. **System Firefox** — used if found. Note: Firefox Developer Edition and Nightly may be incompatible with Playwright's protocol; WebGrep falls through to the next tier silently if they fail.
+3. **Previously downloaded Playwright Firefox** — if you've run WebGrep with SPA rendering before, the cached Firefox build is reused automatically.
+4. **Previously downloaded Playwright Chromium** — same as above for Chromium.
+5. **First-time download** — if no browser is available, WebGrep prompts you to choose Firefox (Mozilla Foundation, ~105 MB, default) or Chromium (Google, ~120 MB). The browser is downloaded once to `~/.cache/ms-playwright` and reused on all future runs.
+
+Use `--browser firefox` or `--browser chromium` to skip to a specific tier. `--browser auto` (the default) always tries the above order.
+
+### Pre-installing a Browser
+
+To avoid the interactive prompt — for example, before running WebGrep in a script or CI pipeline — install a browser upfront with `--install-browser`:
+
+```bash
+# Let WebGrep pick (checks for system browsers first, prompts if none found)
+java -jar WebGrep.jar --install-browser
+
+# Force a specific browser
+java -jar WebGrep.jar --install-browser --browser firefox
+java -jar WebGrep.jar --install-browser --browser chromium
+```
+
+If a compatible system browser is already installed, this command reports it and exits without downloading anything.
+
+### Additional Details
+
+- **Intercepted API links**: Beyond rendering page text, WebGrep intercepts the JSON API calls a SPA makes during page load and extracts document download URLs that are not exposed as plain `<a href>` links (e.g. click-handler-driven PDF downloads). These are queued and searched like any other link.
+- **Non-interactive mode**: When stdin is not a terminal (piped input, scripts), the SPA consent prompt is skipped and rendering is enabled automatically.
+- **Opt out**: Answer `n` at the prompt to disable SPA rendering for the entire session. Detected SPA pages will be processed as plain HTML and will likely return no content.
+
+---
+
 ## Examples
 
 ### Web Crawl
@@ -112,6 +172,12 @@ java -jar WebGrep.jar -u https://example.com -k "annual report" -d 2
 **Search directly inside a remote PDF:**
 ```bash
 java -jar WebGrep.jar -u https://example.com/report.pdf -k "revenue" -d 0
+```
+
+**Search an Angular/React/Vue portal (SPA):**
+```bash
+java -jar WebGrep.jar -u https://portal.example.gov -k "contract" -d 1
+# WebGrep detects the SPA, prompts once, then renders all pages automatically
 ```
 
 **JSON output:**
@@ -306,7 +372,9 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 WebGrep is designed with a modular architecture for performance and maintainability:
 
 - **CliOptions**: Parses and validates all command-line arguments. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
-- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl.
+- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl. On first SPA encounter, prompts the user and delegates to `PlaywrightRenderer`.
+- **PlaywrightRenderer**: Headless browser renderer for JavaScript-rendered SPAs. Manages browser lifecycle and selection across five tiers (system Chromium → system Firefox → cached Playwright Firefox → cached Playwright Chromium → first-time download). Also intercepts JSON API responses to capture document download URLs that SPAs serve via click handlers rather than plain `<a href>` links.
+- **BrowserFinder**: Locates system-installed browser binaries (Chromium/Chrome and Firefox) across Linux, macOS, and Windows via known install paths, falling back to `which`/`where` for non-standard package manager locations.
 - **ContentExtractor**: Extracts searchable text from HTML pages via Jsoup, and from binary documents via Apache Tika with a 30-second timeout per file to prevent hangs on corrupt or oversized content.
 - **MatchEngine**: Pluggable matching strategies (case-insensitive, exact, fuzzy/Levenshtein) with full Unicode and diacritic support. Compiled regex patterns are cached per keyword/mode pair for performance.
 - **ReportWriter**: Renders results as human-readable text or structured JSON. Covers all three input modes.
@@ -315,7 +383,7 @@ WebGrep is designed with a modular architecture for performance and maintainabil
 
 ## Limitations
 
-- **JavaScript**: WebGrep processes static HTML only. Pages that render content client-side (SPAs) may not be fully indexed.
+- **JavaScript (inline)**: WebGrep renders full SPA frameworks (Angular, React, Vue) automatically. Inline JavaScript that is not part of an SPA — custom `onclick` handlers, lazy loaders triggered by user interaction — is not evaluated.
 - **Bot Protection**: JavaScript-based challenges (e.g. Cloudflare Managed Challenges) cannot be bypassed. They are detected and reported under `blocked`.
 - **Robots.txt**: Not parsed. Use `--delay-ms` to be polite to servers.
 - **Authentication**: No support for login forms or HTTP Basic Auth. Session cookies set by the server are maintained across requests automatically.

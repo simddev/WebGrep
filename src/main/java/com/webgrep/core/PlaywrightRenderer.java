@@ -21,21 +21,29 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Falls back to a headless Firefox browser for pages that are Angular/React/Vue SPAs.
+ * Falls back to a headless browser for pages that are Angular/React/Vue SPAs.
  *
  * <p>Beyond rendering page text, it intercepts JSON API responses that the SPA makes
  * during load and extracts document download URLs that are not present as plain
  * {@code <a href>} links in the DOM (e.g. click-handler-driven PDF downloads).
  *
- * <p>Uses Playwright's own Firefox build (Mozilla). On first SPA encounter, Firefox is
- * downloaded once (~105 MB) to {@code ~/.cache/ms-playwright}. No Google products or
- * system-level browser installation required.
+ * <p>Browser resolution order (first available wins):
+ * <ol>
+ *   <li>System Chromium/Chrome — drives natively via CDP, most reliable</li>
+ *   <li>System Firefox — best-effort; may fail on Dev/Nightly editions</li>
+ *   <li>Playwright's cached Firefox (~/.cache/ms-playwright)</li>
+ *   <li>Playwright's cached Chromium</li>
+ *   <li>Prompt user to download Firefox (default) or Chromium</li>
+ * </ol>
+ * Use {@code --browser firefox|chromium} to skip to the preferred tier.
  */
 public class PlaywrightRenderer implements AutoCloseable {
 
     // Matches any relative or absolute URL ending in a document extension inside JSON strings.
+    // .zip excluded: isIgnoredLink() filters zip from non-SPA crawls; keeping it here
+    // would inconsistently queue zip files only on SPA pages.
     private static final Pattern JSON_DOC_URL = Pattern.compile(
-            "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|zip|csv))\"",
+            "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|csv))\"",
             Pattern.CASE_INSENSITIVE);
 
     private Playwright playwright;
@@ -43,12 +51,14 @@ public class PlaywrightRenderer implements AutoCloseable {
     private boolean unavailable = false;
     private final int timeoutMs;
     private final boolean insecure;
+    private final String preferredBrowser; // null/"auto", "firefox", or "chromium"
 
     public record RenderedPage(String text, List<String> links) {}
 
-    public PlaywrightRenderer(int timeoutMs, boolean insecure) {
+    public PlaywrightRenderer(int timeoutMs, boolean insecure, String preferredBrowser) {
         this.timeoutMs = timeoutMs;
         this.insecure = insecure;
+        this.preferredBrowser = "auto".equalsIgnoreCase(preferredBrowser) ? null : preferredBrowser;
     }
 
     public static boolean isSpa(Document doc) {
@@ -83,7 +93,13 @@ public class PlaywrightRenderer implements AutoCloseable {
                 String urlBase = baseUrl(url);
                 page.onResponse(response -> captureDocLinks(response, urlBase, interceptedLinks));
 
-                page.navigate(url);
+                try {
+                    page.navigate(url);
+                } catch (TimeoutError e) {
+                    // Navigation itself timed out — return null for this page but keep the
+                    // renderer alive; a slow page shouldn't disable SPA rendering entirely.
+                    return null;
+                }
                 try {
                     page.waitForLoadState(LoadState.NETWORKIDLE,
                             new Page.WaitForLoadStateOptions().setTimeout(Math.min(timeoutMs, 15_000)));
@@ -179,15 +195,115 @@ public class PlaywrightRenderer implements AutoCloseable {
     private void ensureReady() throws IOException, InterruptedException {
         if (browser != null && browser.isConnected()) return;
 
-        if (!isFirefoxCached()) {
-            System.err.printf("%n  Downloading Firefox for SPA rendering (one-time, ~105 MB)...%n");
-            com.microsoft.playwright.CLI.main(new String[]{"install", "firefox"});
-            System.err.println();
+        // Close stale resources before reinitializing (e.g. after browser disconnect).
+        if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
+        playwright = null;
+        browser = null;
+
+        boolean wantChromium = "chromium".equalsIgnoreCase(preferredBrowser);
+        boolean wantFirefox  = "firefox".equalsIgnoreCase(preferredBrowser);
+
+        // ── 1. System Chromium / Chrome ───────────────────────────────────────
+        // Chromium-family browsers speak CDP natively — Playwright drives them via
+        // executablePath without any custom patches, so this is the most reliable option.
+        if (!wantFirefox) {
+            Optional<Path> sysChr = BrowserFinder.findChromium();
+            if (sysChr.isPresent()) {
+                try {
+                    initPlaywright();
+                    browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                            .setExecutablePath(sysChr.get()).setHeadless(true));
+                    System.err.printf("  SPA renderer: using system Chromium (%s)%n", sysChr.get());
+                    return;
+                } catch (Exception e) {
+                    cleanupPlaywright();
+                }
+            }
         }
 
+        // ── 2. System Firefox ─────────────────────────────────────────────────
+        // Best-effort: Playwright needs its patched Firefox, so this can fail on Dev/Nightly.
+        if (!wantChromium) {
+            Optional<Path> sysFf = BrowserFinder.findFirefox();
+            if (sysFf.isPresent()) {
+                try {
+                    initPlaywright();
+                    browser = playwright.firefox().launch(new BrowserType.LaunchOptions()
+                            .setExecutablePath(sysFf.get()).setHeadless(true));
+                    System.err.printf("  SPA renderer: using system Firefox (%s)%n", sysFf.get());
+                    return;
+                } catch (Exception e) {
+                    // Dev/Nightly often incompatible with Playwright's protocol — fall through silently.
+                    cleanupPlaywright();
+                }
+            }
+        }
+
+        // ── 3. Playwright's cached Firefox ────────────────────────────────────
+        if (!wantChromium && isFirefoxCached()) {
+            System.err.printf("  SPA renderer: using Playwright Firefox%n");
+            initPlaywright();
+            browser = playwright.firefox().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            return;
+        }
+
+        // ── 4. Playwright's cached Chromium ───────────────────────────────────
+        if (!wantFirefox && isChromiumCached()) {
+            System.err.printf("  SPA renderer: using Playwright Chromium%n");
+            initPlaywright();
+            browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            return;
+        }
+
+        // ── 5. Nothing found — ask user which browser to download ─────────────
+        String chosen = (preferredBrowser != null) ? preferredBrowser : promptBrowserChoice();
+        downloadAndLaunch(chosen);
+    }
+
+    private String promptBrowserChoice() {
+        System.err.println();
+        System.err.println("  SPA detected but no compatible browser is available.");
+        System.err.println("  Choose a browser for WebGrep to download (one-time):");
+        System.err.println("    [1] Firefox  (Mozilla Foundation, ~105 MB)  [default]");
+        System.err.println("    [2] Chromium (Google, ~120 MB)");
+        System.err.println();
+        System.err.print("  Enter choice [1/2] or press Enter for Firefox: ");
+
+        try {
+            java.io.Console console = System.console();
+            if (console != null) {
+                String line = console.readLine();
+                if (line != null && line.trim().equals("2")) return "chromium";
+            }
+        } catch (Exception ignored) {}
+        return "firefox";
+    }
+
+    private void downloadAndLaunch(String browserType) throws IOException, InterruptedException {
+        boolean isChromium = "chromium".equalsIgnoreCase(browserType);
+        String label = isChromium ? "Chromium (Google)" : "Firefox (Mozilla)";
+        System.err.printf("%n  Downloading Playwright %s for SPA rendering (~%s MB, one-time)...%n",
+                label, isChromium ? "120" : "105");
+        com.microsoft.playwright.CLI.main(new String[]{"install", isChromium ? "chromium" : "firefox"});
+        System.err.println();
+
+        initPlaywright();
+        if (isChromium) {
+            browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+        } else {
+            browser = playwright.firefox().launch(new BrowserType.LaunchOptions().setHeadless(true));
+        }
+    }
+
+    private void cleanupPlaywright() {
+        if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
+        playwright = null;
+        browser = null;
+    }
+
+    private void initPlaywright() throws IOException {
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
-
         PrintStream originalErr = System.err;
         try {
             System.setErr(new PrintStream(OutputStream.nullOutputStream()));
@@ -195,16 +311,22 @@ public class PlaywrightRenderer implements AutoCloseable {
         } finally {
             System.setErr(originalErr);
         }
-
-        browser = playwright.firefox().launch(new BrowserType.LaunchOptions().setHeadless(true));
     }
 
     private static boolean isFirefoxCached() {
+        return isPlaywrightCached("firefox-");
+    }
+
+    private static boolean isChromiumCached() {
+        return isPlaywrightCached("chromium-");
+    }
+
+    private static boolean isPlaywrightCached(String prefix) {
         try {
             Path cache = Paths.get(System.getProperty("user.home"), ".cache", "ms-playwright");
             if (!Files.isDirectory(cache)) return false;
             try (var entries = Files.list(cache)) {
-                return entries.anyMatch(p -> p.getFileName().toString().startsWith("firefox-"));
+                return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
             }
         } catch (IOException e) {
             return false;
