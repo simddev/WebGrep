@@ -147,7 +147,8 @@ public class ReportWriter {
     }
 
     public void printFolderTextOutput(CliOptions options, List<FileScanResult> results,
-                                      int filesScanned, int filesSkipped, int filesFailed, long durationMs) {
+                                      int filesScanned, int filesSkipped, int filesFailed,
+                                      int stoppedAtMaxHits, long durationMs) {
         int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
 
         System.out.println("--- WebGrep Results ---");
@@ -160,6 +161,11 @@ public class ReportWriter {
             System.out.println("  Failed (unreadable): " + filesFailed);
         System.out.println("  With matches: " + results.size());
         System.out.println("Total matches found: " + totalMatches);
+
+        if (stoppedAtMaxHits > 0) {
+            System.out.println("\nNote: Search stopped early — max-hits limit of "
+                    + stoppedAtMaxHits + " reached.");
+        }
 
         if (results.isEmpty()) return;
 
@@ -178,7 +184,8 @@ public class ReportWriter {
     }
 
     public void printFolderJsonOutput(CliOptions options, List<FileScanResult> results,
-                                      int filesScanned, int filesSkipped, int filesFailed, long durationMs) {
+                                      int filesScanned, int filesSkipped, int filesFailed,
+                                      int stoppedAtMaxHits, long durationMs) {
         int totalMatches = results.stream().mapToInt(FileScanResult::totalMatches).sum();
 
         StringBuilder json = new StringBuilder();
@@ -196,6 +203,9 @@ public class ReportWriter {
         json.append("    \"files_with_matches\": ").append(results.size()).append(",\n");
         json.append("    \"total_matches\": ").append(totalMatches).append("\n");
         json.append("  },\n");
+        if (stoppedAtMaxHits > 0) {
+            json.append("  \"stopped_early\": \"max-hits limit of ").append(stoppedAtMaxHits).append(" reached\",\n");
+        }
         json.append("  \"results\": [\n");
         for (int i = 0; i < results.size(); i++) {
             FileScanResult file = results.get(i);

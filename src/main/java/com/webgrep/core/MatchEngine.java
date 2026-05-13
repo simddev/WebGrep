@@ -1,6 +1,7 @@
 package com.webgrep.core;
 
 import java.text.Normalizer;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -23,19 +24,13 @@ import java.util.regex.Pattern;
  */
 public class MatchEngine {
 
-    private String cachedKeyword;
-    private String cachedMode;
-    private Pattern cachedPattern;
+    private final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
 
     private Pattern getPattern(String keyword, String mode) {
-        if (!keyword.equals(cachedKeyword) || !mode.equals(cachedMode)) {
-            cachedKeyword = keyword;
-            cachedMode = mode;
-            cachedPattern = mode.equals("exact")
-                    ? Pattern.compile(Pattern.quote(keyword))
-                    : Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-        }
-        return cachedPattern;
+        return patternCache.computeIfAbsent(keyword + "\0" + mode, k ->
+                mode.equals("exact")
+                        ? Pattern.compile(Pattern.quote(keyword))
+                        : Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));
     }
 
     public int countMatches(String text, String keyword, String mode) {
@@ -97,6 +92,8 @@ public class MatchEngine {
             int threshold = normalizedKeyword.length() <= 4 ? 1 : 2;
             for (String word : words) {
                 if (word.isEmpty()) continue;
+                // skip words whose length difference alone exceeds the threshold
+                if (Math.abs(word.length() - normalizedKeyword.length()) > threshold) continue;
                 if (levenshteinDistance(word, normalizedKeyword) <= threshold) {
                     count++;
                 }

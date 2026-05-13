@@ -12,6 +12,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
@@ -100,7 +101,7 @@ public class ContentExtractor {
     }
 
     public List<String> extractLinks(Document doc, byte[] rawBody, String baseUrl) {
-        List<String> links = new ArrayList<>();
+        LinkedHashSet<String> links = new LinkedHashSet<>();
         Elements elements = doc.select("a[href]");
         for (Element element : elements) {
             if (links.size() >= MAX_LINKS_PER_PAGE) break;
@@ -121,12 +122,10 @@ public class ContentExtractor {
                 String href = org.jsoup.parser.Parser.unescapeEntities(linkMatcher.group(1), true);
                 String normalizedLink = UrlUtils.normalizeUrl(href, baseUrl);
                 if (!normalizedLink.isEmpty() && !UrlUtils.isIgnoredLink(normalizedLink)) {
-                    if (!links.contains(normalizedLink)) {
-                        links.add(normalizedLink);
-                    }
+                    links.add(normalizedLink); // LinkedHashSet deduplicates in O(1)
                 }
             }
         }
-        return links;
+        return new ArrayList<>(links);
     }
 }
