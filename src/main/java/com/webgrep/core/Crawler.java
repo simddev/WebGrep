@@ -97,111 +97,129 @@ public class Crawler {
     public CrawlResult crawl() {
         CrawlResult crawlResult = new CrawlResult();
         Deque<UrlDepth> queue = new LinkedList<>();
+        PlaywrightRenderer renderer = null;
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
         queue.addLast(new UrlDepth(normalizedStart, 0));
         dedup.markQueued(normalizedStart);
 
-        while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
-            UrlDepth current = queue.pollFirst();
+        try {
+            while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
+                UrlDepth current = queue.pollFirst();
 
-            try {
-                Thread.sleep(options.getDelayMs());
+                try {
+                    Thread.sleep(options.getDelayMs());
 
-                org.jsoup.Connection.Response response = fetchWithRetry(current.url);
-                cookieJar.putAll(response.cookies());
-                // Use the final URL after redirects as the canonical URL for this page
-                String effectiveUrl = response.url().toString();
-                // If the server redirected us, mark the effective URL as queued so that
-                // any other page linking directly to it is not visited a second time.
-                if (!effectiveUrl.equals(current.url)) {
-                    dedup.markQueued(effectiveUrl);
-                }
+                    org.jsoup.Connection.Response response = fetchWithRetry(current.url);
+                    cookieJar.putAll(response.cookies());
+                    // Use the final URL after redirects as the canonical URL for this page
+                    String effectiveUrl = response.url().toString();
+                    // If the server redirected us, mark the effective URL as queued so that
+                    // any other page linking directly to it is not visited a second time.
+                    if (!effectiveUrl.equals(current.url)) {
+                        dedup.markQueued(effectiveUrl);
+                    }
 
-                crawlResult.visitedCount++;
+                    crawlResult.visitedCount++;
 
-                String contentLengthHeader = response.header("Content-Length");
-                if (contentLengthHeader != null) {
-                    try {
-                        long length = Long.parseLong(contentLengthHeader);
-                        if (length > options.getMaxBytes()) {
-                            crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
-                            continue;
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
+                    String contentLengthHeader = response.header("Content-Length");
+                    if (contentLengthHeader != null) {
+                        try {
+                            long length = Long.parseLong(contentLengthHeader);
+                            if (length > options.getMaxBytes()) {
+                                crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
+                                continue;
+                            }
+                        } catch (NumberFormatException ignored) {}
+                    }
 
-                byte[] body = response.bodyAsBytes();
-                if (body.length > options.getMaxBytes()) {
-                    crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
-                    continue;
-                }
-
-                String contentType = response.contentType();
-                String content;
-                List<String> links = new ArrayList<>();
-
-                if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
-                    Document doc = response.parse();
-
-                    if (doc.title().contains("Just a moment...") || doc.text().contains("Enable JavaScript and cookies to continue")) {
-                        crawlResult.addBlocked(effectiveUrl, "Cloudflare/Bot protection challenge");
+                    byte[] body = response.bodyAsBytes();
+                    if (body.length > options.getMaxBytes()) {
+                        crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
                         continue;
                     }
 
-                    crawlResult.parsedCount++;
-                    content = extractor.extractTextFromHtml(doc);
+                    String contentType = response.contentType();
+                    String content;
+                    List<String> links = new ArrayList<>();
+
+                    if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
+                        Document doc = response.parse();
+
+                        if (doc.title().contains("Just a moment...") || doc.text().contains("Enable JavaScript and cookies to continue")) {
+                            crawlResult.addBlocked(effectiveUrl, "Cloudflare/Bot protection challenge");
+                            continue;
+                        }
+
+                        crawlResult.parsedCount++;
+                        content = extractor.extractTextFromHtml(doc);
+                        if (current.depth < options.getDepth()) {
+                            links = extractor.extractLinks(doc, body, effectiveUrl);
+                        }
+
+                        if (PlaywrightRenderer.isSpa(doc)) {
+                            if (renderer == null) {
+                                renderer = new PlaywrightRenderer(options.getTimeoutMs(), options.isInsecure());
+                            }
+                            PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar);
+                            if (rendered != null) {
+                                content = rendered.text();
+                                if (current.depth < options.getDepth()) {
+                                    links = new ArrayList<>(rendered.links());
+                                }
+                            }
+                        }
+                    } else {
+                        content = extractor.extractTextFromBinary(body, effectiveUrl, contentType);
+                        crawlResult.parsedCount++;
+                        crawlResult.docsCount++;
+                    }
+
+                    int count = matchEngine.countMatches(content, options.getKeyword(), options.getMode());
+                    if (count > 0) {
+                        crawlResult.addMatch(effectiveUrl, count);
+                    }
+
                     if (current.depth < options.getDepth()) {
-                        links = extractor.extractLinks(doc, body, effectiveUrl);
-                    }
-                } else {
-                    content = extractor.extractTextFromBinary(body, effectiveUrl, contentType);
-                    crawlResult.parsedCount++;
-                    crawlResult.docsCount++;
-                }
-
-                int count = matchEngine.countMatches(content, options.getKeyword(), options.getMode());
-                if (count > 0) {
-                    crawlResult.addMatch(effectiveUrl, count);
-                }
-
-                if (current.depth < options.getDepth()) {
-                    for (String link : links) {
-                        if (!options.isAllowExternal()) {
-                            String linkHost = extractHost(link);
-                            if (!isSameDomain(linkHost)) {
-                                continue;
+                        for (String link : links) {
+                            if (!options.isAllowExternal()) {
+                                String linkHost = extractHost(link);
+                                if (!isSameDomain(linkHost)) {
+                                    continue;
+                                }
                             }
-                        }
 
-                        if (!dedup.isDuplicate(link) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
-                            dedup.markQueued(link);
-                            if (options.isDfs()) {
-                                queue.addFirst(new UrlDepth(link, current.depth + 1));
-                            } else {
-                                queue.addLast(new UrlDepth(link, current.depth + 1));
+                            if (!dedup.isDuplicate(link) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
+                                dedup.markQueued(link);
+                                if (options.isDfs()) {
+                                    queue.addFirst(new UrlDepth(link, current.depth + 1));
+                                } else {
+                                    queue.addLast(new UrlDepth(link, current.depth + 1));
+                                }
                             }
                         }
                     }
+
+                } catch (org.jsoup.HttpStatusException e) {
+                    if (e.getStatusCode() == HTTP_FORBIDDEN || e.getStatusCode() == HTTP_TOO_MANY_REQUESTS) {
+                        crawlResult.addBlocked(current.url, "HTTP " + e.getStatusCode() + " (Access Denied/Rate Limited)");
+                    } else {
+                        crawlResult.addNetworkError("HTTP " + e.getStatusCode());
+                    }
+                } catch (Exception e) {
+                    crawlResult.addNetworkError(e);
                 }
 
-            } catch (org.jsoup.HttpStatusException e) {
-                if (e.getStatusCode() == HTTP_FORBIDDEN || e.getStatusCode() == HTTP_TOO_MANY_REQUESTS) {
-                    crawlResult.addBlocked(current.url, "HTTP " + e.getStatusCode() + " (Access Denied/Rate Limited)");
-                } else {
-                    crawlResult.addNetworkError("HTTP " + e.getStatusCode());
+                int totalMatches = crawlResult.getTotalMatches();
+                printProgress(current.url, crawlResult.visitedCount, totalMatches);
+
+                if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
+                    crawlResult.stoppedAtMaxHits = options.getMaxHits();
+                    break;
                 }
-            } catch (Exception e) {
-                crawlResult.addNetworkError(e);
             }
-
-            int totalMatches = crawlResult.getTotalMatches();
-            printProgress(current.url, crawlResult.visitedCount, totalMatches);
-
-            if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
-                crawlResult.stoppedAtMaxHits = options.getMaxHits();
-                break;
-            }
+        } finally {
+            if (renderer != null) renderer.close();
         }
 
         System.err.print("\r" + " ".repeat(110) + "\r");
