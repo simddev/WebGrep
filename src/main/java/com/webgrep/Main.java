@@ -35,6 +35,11 @@ public class Main {
                 return;
             }
 
+            if (options.isInstallBrowser()) {
+                installBrowser(options);
+                return;
+            }
+
             options.validate();
 
             ContentExtractor extractor = new ContentExtractor(options.getMaxBytes());
@@ -46,9 +51,9 @@ public class Main {
                 FolderScan scan = scanFolder(options, extractor, matchEngine);
                 long durationMs = System.currentTimeMillis() - startTime;
                 if ("json".equals(options.getOutput())) {
-                    reportWriter.printFolderJsonOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), durationMs);
+                    reportWriter.printFolderJsonOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), scan.stoppedAtMaxHits(), durationMs);
                 } else {
-                    reportWriter.printFolderTextOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), durationMs);
+                    reportWriter.printFolderTextOutput(options, scan.results(), scan.scanned(), scan.skipped(), scan.failed(), scan.stoppedAtMaxHits(), durationMs);
                 }
             } else if (options.getFile() != null) {
                 List<FileMatch> fileMatches = scanLocalFile(options, extractor, matchEngine);
@@ -86,7 +91,7 @@ public class Main {
         }
     }
 
-    private record FolderScan(List<FileScanResult> results, int scanned, int skipped, int failed) {}
+    private record FolderScan(List<FileScanResult> results, int scanned, int skipped, int failed, int stoppedAtMaxHits) {}
 
     private static FolderScan scanFolder(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
             throws Exception {
@@ -100,7 +105,8 @@ public class Main {
         }
 
         List<FileScanResult> results = new ArrayList<>();
-        int scanned = 0, skipped = 0, failed = 0;
+        int scanned = 0, skipped = 0, failed = 0, totalMatches = 0;
+        boolean stoppedEarly = false;
 
         for (Path path : files) {
             if (path.toFile().length() > options.getMaxBytes()) {
@@ -115,13 +121,18 @@ public class Main {
                 List<FileMatch> matches = findLineMatches(text, options.getKeyword(), options.getMode(), matchEngine);
                 if (!matches.isEmpty()) {
                     results.add(new FileScanResult(path.toString(), matches));
+                    totalMatches += matches.stream().mapToInt(FileMatch::count).sum();
                 }
             } catch (Exception e) {
                 failed++;
             }
+            if (options.getMaxHits() > 0 && totalMatches >= options.getMaxHits()) {
+                stoppedEarly = true;
+                break;
+            }
         }
         System.err.print("\r" + " ".repeat(100) + "\r");
-        return new FolderScan(results, scanned, skipped, failed);
+        return new FolderScan(results, scanned, skipped, failed, stoppedEarly ? options.getMaxHits() : 0);
     }
 
     private static List<FileMatch> scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
@@ -129,6 +140,10 @@ public class Main {
         File f = new File(options.getFile());
         if (!f.exists() || !f.isFile())
             throw new IllegalArgumentException("File not found: " + options.getFile());
+        if (f.length() > options.getMaxBytes()) {
+            System.err.println("Warning: file exceeds --max-bytes limit, skipping: " + options.getFile());
+            return List.of();
+        }
 
         byte[] bytes = Files.readAllBytes(f.toPath());
         String text = extractor.extractTextFromBinary(bytes, f.getName(), null);
@@ -156,6 +171,45 @@ public class Main {
             }
         }
         return matches;
+    }
+
+    private static void installBrowser(CliOptions options) throws Exception {
+        String pref = options.getBrowser(); // "auto", "firefox", or "chromium"
+
+        // Check for an already-usable system browser first.
+        java.util.Optional<java.nio.file.Path> sysChr = com.webgrep.core.BrowserFinder.findChromium();
+        java.util.Optional<java.nio.file.Path> sysFf  = com.webgrep.core.BrowserFinder.findFirefox();
+
+        if (sysChr.isPresent() && !pref.equals("firefox")) {
+            System.out.println("System Chromium/Chrome already available at: " + sysChr.get());
+            System.out.println("WebGrep will use it automatically — no installation needed.");
+            return;
+        }
+        if (sysFf.isPresent() && !pref.equals("chromium")) {
+            System.out.println("System Firefox already available at: " + sysFf.get());
+            System.out.println("WebGrep will use it automatically — no installation needed.");
+            return;
+        }
+
+        // Decide what to download.
+        String toInstall;
+        if (pref.equals("firefox") || pref.equals("chromium")) {
+            toInstall = pref;
+        } else {
+            // Auto: prompt
+            System.out.println("No system browser found. Choose a browser to install:");
+            System.out.println("  [1] Firefox  (Mozilla Foundation, ~105 MB)  [default]");
+            System.out.println("  [2] Chromium (Google, ~120 MB)");
+            System.out.print("Enter choice [1/2] or Enter for Firefox: ");
+            java.io.Console console = System.console();
+            String line = console != null ? console.readLine() : null;
+            toInstall = (line != null && line.trim().equals("2")) ? "chromium" : "firefox";
+        }
+
+        String label = toInstall.equals("chromium") ? "Chromium (Google)" : "Firefox (Mozilla)";
+        System.out.println("Installing Playwright " + label + "...");
+        com.microsoft.playwright.CLI.main(new String[]{"install", toInstall});
+        System.out.println("Done. WebGrep will use it automatically for SPA pages.");
     }
 
     private static void setupLogging() {

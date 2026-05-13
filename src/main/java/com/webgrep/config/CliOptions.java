@@ -22,7 +22,7 @@ public class CliOptions {
     private static final Set<String> KNOWN_FLAGS = Set.of(
         "url", "file", "folder", "keyword", "depth", "mode", "max-pages", "max-bytes",
         "timeout-ms", "delay-ms", "max-hits", "allow-external", "insecure", "all-urls",
-        "dfs", "output", "help"
+        "dfs", "output", "help", "install-browser", "browser"
     );
 
     private String url;
@@ -42,6 +42,8 @@ public class CliOptions {
     private String output = "text";
     private int delayMs = 100;
     private boolean help = false;
+    private boolean installBrowser = false;
+    private String browser = "auto"; // "auto", "firefox", or "chromium"
 
     public static CliOptions parse(String[] args) {
         CliOptions options = new CliOptions();
@@ -80,6 +82,16 @@ public class CliOptions {
             return options;
         }
 
+        // Parse --browser before any early-return so it's available alongside --install-browser.
+        options.browser = params.getOrDefault("browser", "auto").toLowerCase();
+        if (!options.browser.equals("auto") && !options.browser.equals("firefox") && !options.browser.equals("chromium"))
+            throw new IllegalArgumentException("Invalid browser: " + options.browser + ". Use auto, firefox, or chromium.");
+
+        if (params.containsKey("install-browser")) {
+            options.installBrowser = true;
+            return options;
+        }
+
         options.url = params.get("url");
         options.file = params.get("file");
         options.folder = params.get("folder");
@@ -108,7 +120,9 @@ public class CliOptions {
 
     private static boolean isValuedFlag(String key) {
         if (key == null) return false;
-        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("all-urls") && !key.equals("dfs") && !key.equals("help");
+        // Boolean flags take no value; all others (url, keyword, depth, mode, browser, …) do.
+        return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("all-urls")
+            && !key.equals("dfs") && !key.equals("help") && !key.equals("install-browser");
     }
 
     private static String mapShortFlag(char c) {
@@ -135,7 +149,7 @@ public class CliOptions {
     }
 
     public void validate() {
-        if (help) return;
+        if (help || installBrowser) return;
         int inputCount = (url != null ? 1 : 0) + (file != null ? 1 : 0) + (folder != null ? 1 : 0);
         if (inputCount > 1)
             throw new IllegalArgumentException("--url, --file, and --folder are mutually exclusive — specify only one");
@@ -157,6 +171,9 @@ public class CliOptions {
         }
         if (!output.equals("text") && !output.equals("json")) {
             throw new IllegalArgumentException("Invalid output format: " + output + ". Use text or json.");
+        }
+        if (!browser.equals("auto") && !browser.equals("firefox") && !browser.equals("chromium")) {
+            throw new IllegalArgumentException("Invalid browser: " + browser + ". Use auto, firefox, or chromium.");
         }
     }
 
@@ -183,6 +200,8 @@ public class CliOptions {
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
+        System.out.println("      --browser <type>     Browser for SPA rendering: auto (default), firefox, or chromium");
+        System.out.println("      --install-browser    Install a browser for SPA rendering and exit (uses --browser preference)");
         System.out.println("  -h, --help               Show this help message");
     }
 
@@ -204,4 +223,6 @@ public class CliOptions {
     public String getOutput() { return output; }
     public int getDelayMs() { return delayMs; }
     public boolean isHelp() { return help; }
+    public boolean isInstallBrowser() { return installBrowser; }
+    public String getBrowser() { return browser; }
 }

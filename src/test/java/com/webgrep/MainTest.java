@@ -579,4 +579,65 @@ public class MainTest {
             assertTrue(e.getMessage().contains("--no-such-flag"));
         }
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // CliOptions — --browser flag
+    // ────────────────────────────────────────────────────────────────
+
+    @Test
+    public void testBrowserDefaultIsAuto() {
+        String[] args = {"-u", "http://example.com", "-k", "test"};
+        CliOptions options = CliOptions.parse(args);
+        assertEquals("auto", options.getBrowser());
+    }
+
+    @Test
+    public void testBrowserFirefox() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--browser", "firefox"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals("firefox", options.getBrowser());
+    }
+
+    @Test
+    public void testBrowserChromium() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--browser", "chromium"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals("chromium", options.getBrowser());
+    }
+
+    @Test
+    public void testBrowserCaseInsensitive() {
+        String[] args = {"-u", "http://example.com", "-k", "test", "--browser", "Firefox"};
+        CliOptions options = CliOptions.parse(args);
+        options.validate();
+        assertEquals("firefox", options.getBrowser());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testBrowserInvalidValueRejected() {
+        CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "--browser", "safari"});
+    }
+
+    @Test
+    public void testInstallBrowserFlag() {
+        String[] args = {"--install-browser"};
+        CliOptions options = CliOptions.parse(args);
+        assertTrue(options.isInstallBrowser());
+        assertEquals("auto", options.getBrowser());
+    }
+
+    @Test
+    public void testInstallBrowserWithBrowserPreference() {
+        String[] args = {"--install-browser", "--browser", "chromium"};
+        CliOptions options = CliOptions.parse(args);
+        assertTrue(options.isInstallBrowser());
+        assertEquals("chromium", options.getBrowser());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testInstallBrowserWithInvalidBrowserRejected() {
+        CliOptions.parse(new String[]{"--install-browser", "--browser", "ie"});
+    }
 }
