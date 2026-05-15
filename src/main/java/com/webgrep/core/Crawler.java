@@ -17,7 +17,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Crawls a website starting from a seed URL and searches every visited page for a keyword.
@@ -181,16 +180,9 @@ public class Crawler {
                                 if (rendered != null) {
                                     content = rendered.text();
                                     if (current.depth < options.getDepth()) {
-                                        // From SPA pages, queue API-intercepted document links and any
-                                        // direct document download links (<a href="...pdf">) found in
-                                        // the rendered DOM. Angular navigation routes (no document
-                                        // extension) are intentionally skipped — each requires a full
-                                        // Playwright render and typically adds no content beyond what
-                                        // the API interception already captured.
-                                        links = Stream.concat(
-                                                rendered.docLinks().stream(),
-                                                rendered.links().stream().filter(UrlUtils::hasDocumentExtension)
-                                        )
+                                        List<String> allRenderedLinks = new ArrayList<>(rendered.links());
+                                        allRenderedLinks.addAll(rendered.docLinks());
+                                        links = allRenderedLinks.stream()
                                                 .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
                                                 .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
                                                 .distinct()
