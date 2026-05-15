@@ -3,8 +3,6 @@ package com.webgrep.core;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.LoadState;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.jsoup.nodes.Document;
 
 import java.io.IOException;
@@ -43,7 +41,7 @@ public class PlaywrightRenderer implements AutoCloseable {
     // .zip excluded: isIgnoredLink() filters zip from non-SPA crawls; keeping it here
     // would inconsistently queue zip files only on SPA pages.
     private static final Pattern JSON_DOC_URL = Pattern.compile(
-            "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|csv))\"",
+            "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|csv)(?:\\?[^\"]*)?)\"",
             Pattern.CASE_INSENSITIVE);
 
     private Playwright playwright;
@@ -53,13 +51,13 @@ public class PlaywrightRenderer implements AutoCloseable {
     private String persistentBaseUrl;
     // Shared state for the persistent page's response interceptor; cleared before each navigation.
     private final List<String> interceptedLinks = Collections.synchronizedList(new ArrayList<>());
-    private String interceptorUrlBase = "";
+    private volatile String interceptorUrlBase = "";
     private boolean unavailable = false;
     private final int timeoutMs;
     private final boolean insecure;
     private final String preferredBrowser; // null/"auto", "firefox", or "chromium"
 
-    public record RenderedPage(String text, List<String> links, List<String> docLinks) {}
+    public record RenderedPage(String text, List<String> links, List<String> docLinks, Map<String, String> cookies) {}
 
     public PlaywrightRenderer(int timeoutMs, boolean insecure, String preferredBrowser) {
         this.timeoutMs = timeoutMs;
@@ -79,13 +77,28 @@ public class PlaywrightRenderer implements AutoCloseable {
         org.jsoup.nodes.Element rootDiv = doc.selectFirst("div#root, div#app");
         if (rootDiv != null && rootDiv.text().length() < 100) return true;
         String bodyText = doc.body() != null ? doc.body().text() : "";
-        return bodyText.length() < 300 && !doc.select("script[src*='.js']").isEmpty();
+        // Minimal body (< 100 chars, e.g. "Loading...") + any JS bundle → likely SPA shell.
+        // Slightly longer body (< 300 chars) requires 2+ bundles — SPAs always load multiple
+        // chunks, whereas a static page with a single analytics script has only one.
+        var scripts = doc.select("script[src*='.js']");
+        return bodyText.length() < 100 && !scripts.isEmpty()
+                || bodyText.length() < 300 && scripts.size() >= 2;
     }
 
     public RenderedPage render(String url, Map<String, String> cookies) {
         if (unavailable) return null;
         try {
             ensureReady();
+        } catch (Exception e) {
+            unavailable = true;
+            String cause = e.getMessage() != null
+                    ? e.getMessage().lines().findFirst().orElse("unknown error")
+                    : e.getClass().getSimpleName();
+            System.err.printf("%n  Warning: SPA rendering unavailable (%s).%n"
+                    + "  JavaScript-rendered pages will return no results.%n%n", cause);
+            return null;
+        }
+        try {
             String urlBase = baseUrl(url);
 
             // Keep a single BrowserContext and Page alive across renders on the same domain.
@@ -113,9 +126,9 @@ public class PlaywrightRenderer implements AutoCloseable {
                 persistentPage.setDefaultTimeout(timeoutMs);
                 persistentPage.onResponse(
                         response -> captureDocLinks(response, this.interceptorUrlBase, this.interceptedLinks));
+                passCookies(persistentContext, cookies, url);
                 persistentBaseUrl = urlBase;
             }
-            passCookies(persistentContext, cookies, url);
 
             interceptedLinks.clear();
             interceptorUrlBase = urlBase;
@@ -171,7 +184,12 @@ public class PlaywrightRenderer implements AutoCloseable {
                     + "        || h.startsWith('#')) continue;"
                     + "    try { ls.push(new URL(h, base).toString()); } catch(_) {}"
                     + "  }"
-                    + "  return { text: document.body ? document.body.innerText : '',"
+                    + "  const wgRoot = document.querySelector("
+                    + "    'main, [role=main], [role=content], app-root, #app, #root, #content'"
+                    + "  ) || document.body;"
+                    + "  const wgClone = wgRoot ? wgRoot.cloneNode(true) : null;"
+                    + "  if (wgClone) wgClone.querySelectorAll('script,style,noscript').forEach(n=>n.remove());"
+                    + "  return { text: wgClone ? (wgClone.textContent || '') : '',"
                     + "           links: [...new Set(ls)] };"
                     + "}", url);
 
@@ -183,17 +201,40 @@ public class PlaywrightRenderer implements AutoCloseable {
 
             List<String> captured = new ArrayList<>(interceptedLinks);
 
+            // Round-trip cookies for the crawled host back to the crawler's jar so they
+            // survive context switches and are available to the Jsoup fetcher.
+            // Only include cookies scoped to the page's own domain — third-party cookies
+            // set by analytics scripts must not be filed under the wrong host.
+            Map<String, String> contextCookies = new HashMap<>();
+            if (persistentContext != null) {
+                try {
+                    String pageHost = new URL(url).getHost().toLowerCase();
+                    persistentContext.cookies().forEach(c -> {
+                        if (c.name == null || c.value == null) return;
+                        if (c.domain == null) { contextCookies.put(c.name, c.value); return; }
+                        String d = c.domain.toLowerCase();
+                        if (d.startsWith(".")) d = d.substring(1);
+                        if (pageHost.equals(d) || pageHost.endsWith("." + d)) {
+                            contextCookies.put(c.name, c.value);
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+
             return new RenderedPage(
                     text != null ? text : "",
                     domLinks != null ? domLinks : new ArrayList<>(),
-                    captured.stream().distinct().collect(Collectors.toList()));
+                    captured.stream().distinct().collect(Collectors.toList()),
+                    contextCookies);
         } catch (Exception e) {
-            unavailable = true;
+            // Page-level error (JS exception, stale context, etc.) — skip this page but
+            // keep the renderer alive so subsequent pages can still be rendered.
             String cause = e.getMessage() != null
                     ? e.getMessage().lines().findFirst().orElse("unknown error")
                     : e.getClass().getSimpleName();
-            System.err.printf("%n  Warning: SPA rendering unavailable (%s).%n"
-                    + "  JavaScript-rendered pages will return no results.%n%n", cause);
+            System.err.printf("%n  Warning: SPA render failed for %s (%s). Skipping page.%n%n",
+                    url, cause);
+            closePersistentContext();
             return null;
         }
     }
@@ -208,64 +249,36 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Called for every HTTP response the browser receives. Extracts document download
-     * URLs from JSON API responses in two ways:
-     * <ol>
-     *   <li>infodeska.gov.cz {@code vyveseni/vyhledej}: parses the notices array and
-     *       constructs {@code /soubor/{id}/download} URLs from each file's UUID.</li>
-     *   <li>Generic: regex-scans any JSON response for URL strings ending in common
-     *       document extensions (.pdf, .docx, .xlsx, …).</li>
-     * </ol>
+     * Called for every HTTP response the browser receives. Regex-scans any JSON
+     * API response for URL strings ending in common document extensions
+     * (.pdf, .docx, .xlsx, …) and adds them to the intercepted-links list so the
+     * crawler can fetch and search those documents.
      */
     private static void captureDocLinks(Response response, String urlBase, List<String> out) {
         try {
             if (response.status() != 200) return;
             String ct = response.headers().getOrDefault("content-type", "");
             if (!ct.contains("application/json")) return;
-            String body = response.text();
-            String respUrl = response.url();
-
-            if (respUrl.contains("/vyveseni/vyhledej")) {
-                extractInfodeskaLinks(body, urlBase, out);
-                return;
+            // Skip large JSON responses to avoid blocking the network thread
+            String cl = response.headers().getOrDefault("content-length", "");
+            if (!cl.isEmpty()) {
+                try { if (Long.parseLong(cl) > 5_000_000) return; } catch (NumberFormatException ignored) {}
             }
+            String body = response.text();
 
-            // Generic fallback: extract document URLs embedded as strings in any JSON response.
             Matcher m = JSON_DOC_URL.matcher(body);
             while (m.find()) {
                 String found = m.group(1);
-                if (found.startsWith("/")) {
+                if (found.startsWith("//")) {
+                    // Protocol-relative URL — inherit scheme from the page base
+                    out.add(urlBase.startsWith("https") ? "https:" + found : "http:" + found);
+                } else if (found.startsWith("/")) {
                     out.add(urlBase + found);
                 } else {
                     out.add(found);
                 }
             }
         } catch (Exception ignored) {}
-    }
-
-    /**
-     * Parses the infodeska.gov.cz {@code vyveseni/vyhledej} response.
-     * Each notice in the array can have a {@code soubory} list whose items carry
-     * an {@code id} (UUID). The download URL is {@code /eudpub/api/v1/vyveseni/soubor/{id}/download}.
-     */
-    private static void extractInfodeskaLinks(String body, String urlBase, List<String> out) {
-        // Derive the API base from urlBase (drop any path prefix beyond the host)
-        String apiBase = urlBase + "/eudpub/api/v1/vyveseni";
-        JSONArray array = new JSONArray(body);
-        for (int i = 0; i < array.length(); i++) {
-            JSONObject item = array.optJSONObject(i);
-            if (item == null) continue;
-            JSONArray soubory = item.optJSONArray("soubory");
-            if (soubory == null) continue;
-            for (int j = 0; j < soubory.length(); j++) {
-                String id = soubory.optJSONObject(j) != null
-                        ? soubory.getJSONObject(j).optString("id", "")
-                        : "";
-                if (!id.isEmpty()) {
-                    out.add(apiBase + "/soubor/" + id + "/download");
-                }
-            }
-        }
     }
 
     private void ensureReady() throws IOException, InterruptedException {
@@ -332,6 +345,13 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
 
         // ── 5. Nothing found — ask user which browser to download ─────────────
+        // Refuse to download silently in non-interactive sessions (CI, piped output,
+        // Docker). Without a TTY the user cannot confirm the download; they must run
+        // 'webgrep --install-browser' explicitly first.
+        if (System.console() == null) {
+            throw new IOException("No browser available for SPA rendering and no TTY to prompt. "
+                    + "Run 'webgrep --install-browser' to install one.");
+        }
         String chosen = (preferredBrowser != null) ? preferredBrowser : promptBrowserChoice();
         downloadAndLaunch(chosen);
     }
@@ -412,7 +432,7 @@ public class PlaywrightRenderer implements AutoCloseable {
     private void passCookies(BrowserContext context, Map<String, String> cookies, String url) {
         if (cookies.isEmpty()) return;
         try {
-            String domain = new URL(url).getHost();
+            String domain = new URL(url).getHost().toLowerCase();
             List<Cookie> pwCookies = cookies.entrySet().stream()
                     .map(e -> new Cookie(e.getKey(), e.getValue()).setDomain(domain).setPath("/"))
                     .collect(Collectors.toList());

@@ -10,31 +10,31 @@ public class UrlDeduplicatorTest {
 
     @Test
     public void testSortVariantIsDeduped() {
-        // justice.cz pattern: seed has ?subjkod=X, sort variants add ?subjkod=X&r=agenda etc.
+        // Seed has ?id=X; sort/filter variants add extra params on top → duplicates
         UrlDeduplicator d = new UrlDeduplicator(false);
-        String seed = "http://example.com/page.aspx?subjkod=207020";
+        String seed = "http://example.com/page.aspx?id=12345";
         assertFalse(d.isDuplicate(seed));
         d.markQueued(seed);
 
         // Same base + same primary param + extra sort param → duplicate
-        assertTrue(d.isDuplicate("http://example.com/page.aspx?subjkod=207020&r=agenda"));
-        assertTrue(d.isDuplicate("http://example.com/page.aspx?subjkod=207020&r=od"));
-        assertTrue(d.isDuplicate("http://example.com/page.aspx?subjkod=207020&s=l"));
-        assertTrue(d.isDuplicate("http://example.com/page.aspx?subjkod=207020&r=agenda&s=l"));
+        assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=name"));
+        assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=date"));
+        assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&dir=asc"));
+        assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=name&dir=asc"));
     }
 
     @Test
     public void testContentIdUrlsAreNotDeduped() {
-        // soubor.aspx?souborid=9477999 and ?souborid=1234 are different documents
+        // file.aspx?fileid=1001 and ?fileid=1002 are different documents
         UrlDeduplicator d = new UrlDeduplicator(false);
-        String first = "http://example.com/soubor.aspx?souborid=9477999";
+        String first = "http://example.com/file.aspx?fileid=1001";
         assertFalse(d.isDuplicate(first));
         d.markQueued(first);
 
         // Different value for the same key → NOT a duplicate
-        assertFalse(d.isDuplicate("http://example.com/soubor.aspx?souborid=1234"));
-        assertFalse(d.isDuplicate("http://example.com/soubor.aspx?souborid=5678"));
-        assertFalse(d.isDuplicate("http://example.com/soubor.aspx?souborid=0"));
+        assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1002"));
+        assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1003"));
+        assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=0"));
     }
 
     @Test
@@ -83,24 +83,27 @@ public class UrlDeduplicatorTest {
     }
 
     @Test
-    public void testNoParamBaseBlocksAllVariants() {
-        // Once base path without params is visited, any parameterized variant is a dup
+    public void testNoParamBaseAllowsParameterizedVariants() {
+        // Visiting the bare base path must NOT block parameterized variants —
+        // ?cat=docs and ?sort=asc could be entirely different content pages.
         UrlDeduplicator d = new UrlDeduplicator(false);
         d.markQueued("http://example.com/page");
-        assertTrue(d.isDuplicate("http://example.com/page?sort=asc"));
-        assertTrue(d.isDuplicate("http://example.com/page?sort=desc"));
-        assertTrue(d.isDuplicate("http://example.com/page?foo=bar"));
+        assertFalse(d.isDuplicate("http://example.com/page?sort=asc"));
+        assertFalse(d.isDuplicate("http://example.com/page?sort=desc"));
+        assertFalse(d.isDuplicate("http://example.com/page?foo=bar"));
+        // The exact bare URL itself is still a dup.
+        assertTrue(d.isDuplicate("http://example.com/page"));
     }
 
     @Test
     public void testDifferentBasePathsAreIndependent() {
         // Dedup state for one path must not affect another
         UrlDeduplicator d = new UrlDeduplicator(false);
-        d.markQueued("http://example.com/soubor.aspx?souborid=1");
+        d.markQueued("http://example.com/file.aspx?fileid=1");
 
         // Different base path is unrelated
-        assertFalse(d.isDuplicate("http://example.com/vyveseni.aspx?souborid=1"));
-        assertFalse(d.isDuplicate("http://example.com/other.aspx?souborid=9999"));
+        assertFalse(d.isDuplicate("http://example.com/list.aspx?fileid=1"));
+        assertFalse(d.isDuplicate("http://example.com/other.aspx?fileid=9999"));
     }
 
     // ── param ordering ─────────────────────────────────────────────────────────
@@ -130,19 +133,19 @@ public class UrlDeduplicatorTest {
     public void testAllUrlsModeDisablesSortDedup() {
         // With --all-urls, sort variants should NOT be deduped
         UrlDeduplicator d = new UrlDeduplicator(true);
-        d.markQueued("http://example.com/page?subjkod=207020");
+        d.markQueued("http://example.com/page?id=12345");
 
-        assertFalse(d.isDuplicate("http://example.com/page?subjkod=207020&r=agenda"));
-        assertFalse(d.isDuplicate("http://example.com/page?subjkod=207020&r=od"));
+        assertFalse(d.isDuplicate("http://example.com/page?id=12345&sort=name"));
+        assertFalse(d.isDuplicate("http://example.com/page?id=12345&sort=date"));
     }
 
     @Test
     public void testAllUrlsModeAllowsAllContentIds() {
         UrlDeduplicator d = new UrlDeduplicator(true);
-        d.markQueued("http://example.com/soubor.aspx?souborid=9477999");
+        d.markQueued("http://example.com/file.aspx?fileid=1001");
 
-        assertFalse(d.isDuplicate("http://example.com/soubor.aspx?souborid=1234"));
-        assertFalse(d.isDuplicate("http://example.com/soubor.aspx?souborid=5678"));
+        assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1002"));
+        assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1003"));
     }
 
     // ── size tracking ──────────────────────────────────────────────────────────

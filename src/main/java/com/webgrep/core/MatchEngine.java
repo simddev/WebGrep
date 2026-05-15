@@ -48,7 +48,11 @@ public class MatchEngine {
         } else if (mode.equals("fuzzy")) {
             return countFuzzyMatches(text, keyword);
         } else {
-            // Default: case-insensitive
+            // Default: case-insensitive with Unicode and diacritic support.
+            // Regex handles exact case-insensitive matches; the simplified pass catches
+            // accented variants (e.g. "cafe" matches "Caf\u00E9"). Both are always counted and
+            // the higher result is returned, because a text like "cafe Caf\u00E9" would yield
+            // only 1 from regex (missing "Caf\u00E9") but 2 from the simplified pass.
             int count = 0;
             String processedText = text.replace('\u00A0', ' ');
             Matcher matcher = getPattern(keyword, mode).matcher(processedText);
@@ -56,18 +60,20 @@ public class MatchEngine {
                 count++;
             }
 
-            if (count == 0) {
-                String simpleKeyword = superSimplify(keyword);
-                String simpleText = superSimplify(text);
-                // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
-                // don't degrade to a single letter that matches every word in the text.
-                if (simpleKeyword.length() >= 2) {
-                    int idx = 0;
-                    while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
-                        count++;
-                        idx += simpleKeyword.length();
-                    }
+            String simpleKeyword = superSimplify(keyword);
+            String simpleText = superSimplify(text);
+            // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
+            // don't degrade to a single letter that matches every word in the text.
+            // The simplified pass is always needed: even a pure-ASCII keyword like "cafe"
+            // must match accented variants in the text ("Café"), which regex cannot find.
+            if (simpleKeyword.length() >= 2) {
+                int simpleCount = 0;
+                int idx = 0;
+                while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
+                    simpleCount++;
+                    idx += simpleKeyword.length();
                 }
+                count = Math.max(count, simpleCount);
             }
             return count;
         }

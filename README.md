@@ -13,7 +13,7 @@ WebGrep is a high-performance CLI keyword search tool with three modes: **web cr
 ### Option 1 — Native JAR (requires Java 17+)
 ```bash
 mvn package
-java -jar target/WebGrep-1.1.2.jar -u https://example.com -k "your keyword"
+java -jar target/WebGrep-1.1.3.jar -u https://example.com -k "your keyword"
 ```
 
 ### Option 2 — Docker (no Java required)
@@ -32,6 +32,8 @@ docker run --rm -v /path/to/documents:/data webgrep -F /data -k confidential
 ```
 
 The Docker image uses a multi-stage build — Maven compiles the JAR in the build stage, only the lightweight Alpine JRE is included in the final image (~90 MB).
+
+> **SPA rendering in Docker**: The Docker image does not include a headless browser. JavaScript-rendered SPA pages cannot be crawled from within the container. For SPA support, use the JAR directly and run `--install-browser` once to set up a browser on the host.
 
 ---
 
@@ -150,7 +152,7 @@ If a compatible system browser is already installed, this command reports it and
 ### Additional Details
 
 - **Intercepted API links**: Beyond rendering page text, WebGrep intercepts the JSON API calls a SPA makes during page load and extracts document download URLs that are not exposed as plain `<a href>` links (e.g. click-handler-driven PDF downloads). These are queued and searched like any other link.
-- **Non-interactive mode**: When stdin is not a terminal (piped input, scripts), the SPA consent prompt is skipped and rendering is enabled automatically.
+- **Non-interactive mode**: When stdin is not a terminal (piped input, scripts, CI), the SPA consent prompt is skipped and rendering proceeds automatically if a compatible browser is already installed. If no browser is found in a non-interactive context, WebGrep will not download one silently — it skips SPA rendering and logs a warning. Run `--install-browser` ahead of time to pre-install a browser for CI use.
 - **Opt out**: Answer `n` at the prompt to disable SPA rendering for the entire session. Detected SPA pages will be processed as plain HTML and will likely return no content.
 
 ---

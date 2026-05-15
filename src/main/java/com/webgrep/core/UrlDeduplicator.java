@@ -9,7 +9,7 @@ import java.util.*;
  *   A URL is a duplicate if its query params are a superset of the first-queued URL's
  *   params for that base path (same keys AND same values). This deduplicates sort/filter
  *   variants (e.g. ?id=1&sort=asc vs ?id=1) without collapsing content-addressed URLs
- *   (e.g. ?souborid=9477999 vs ?souborid=1234).
+ *   (e.g. ?fileid=1001 vs ?fileid=1002).
  *
  * When allUrls=true, only exact-URL duplicates are suppressed.
  *
@@ -49,14 +49,15 @@ public class UrlDeduplicator {
         if (!canonicalPathParams.containsKey(base)) return false;
 
         Set<String> canonical = canonicalPathParams.get(base);
-        // Base path was visited without any params → any parameterized variant is a dup
-        if (canonical.isEmpty()) return true;
+        // Base path was visited without any params → allow parameterized variants through;
+        // the bare path itself won't be re-queued (already in queued set above).
+        if (canonical.isEmpty()) return false;
 
         // Parse new URL's params as key=value tokens
         Set<String> newParams = new HashSet<>(Arrays.asList(key.substring(q + 1).split("&")));
         // Duplicate if new URL contains ALL canonical key=value pairs
-        // e.g. ?subjkod=207020&r=agenda → dup of ?subjkod=207020  (adds param on top)
-        //      ?souborid=1234           → NOT dup of ?souborid=9477999  (different value)
+        // e.g. ?id=1&sort=asc → dup of ?id=1  (adds sort param on top)
+        //      ?id=2           → NOT dup of ?id=1  (different value)
         return newParams.containsAll(canonical);
     }
 

@@ -654,4 +654,138 @@ public class MainTest {
     public void testInstallBrowserWithInvalidBrowserRejected() {
         CliOptions.parse(new String[]{"--install-browser", "--browser", "ie"});
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // Regression tests for v1.1.3 fixes
+    // ────────────────────────────────────────────────────────────────
+
+    @Test
+    public void testAddMatchAccumulatesAcrossVisits() {
+        // v1.1.3: addMatch must use merge, not put — second call must add to existing count
+        CrawlResult result = new CrawlResult();
+        result.addMatch("http://example.com/page", 3);
+        result.addMatch("http://example.com/page", 2);
+        assertEquals(5, (int) result.results.get("http://example.com/page"));
+        assertEquals(5, result.getTotalMatches());
+    }
+
+    @Test
+    public void testDefaultModeMixedAccentAndPlainCounting() {
+        // v1.1.3: "cafe Café" with keyword "cafe" must count both, not just the plain one.
+        // Before the fix, the regex matched only "cafe" (count=1) and the simplified
+        // fallback was skipped, so "Café" was missed.
+        MatchEngine engine = new MatchEngine();
+        assertEquals(2, engine.countMatches("cafe Café", "cafe", "default"));
+        assertEquals(2, engine.countMatches("Café cafe", "cafe", "default"));
+        assertEquals(2, engine.countMatches("Café cafe", "café", "default"));
+        assertEquals(4, engine.countMatches("cafe Café café CAFE", "cafe", "default"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testMissingFlagValueThrows() {
+        // -u requires a value; -k as the next arg must not silently become the URL
+        CliOptions.parse(new String[]{"-u", "-k", "keyword"});
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testMissingFlagValueAtEndThrows() {
+        // -u at end of args with no value must throw
+        CliOptions.parse(new String[]{"-u"});
+    }
+
+    @Test
+    public void testNegativeNumberIsValidFlagValue() {
+        // -d -1 should parse as depth=-1 (negative numbers are valid values, not flags)
+        CliOptions opts = CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "x", "-d", "-1"});
+        assertEquals(-1, opts.getDepth());
+    }
+
+    @Test
+    public void testFolderScanSkipsSymlinks() throws Exception {
+        // v1.1.3: symlinks must be excluded from the folder scan
+        java.nio.file.Path tmp = java.nio.file.Files.createTempDirectory("webgrep-symlink-test");
+        try {
+            java.nio.file.Path real = tmp.resolve("real.txt");
+            java.nio.file.Files.writeString(real, "keyword found here");
+            // Symlink pointing at the real file — should NOT be scanned as a second copy
+            java.nio.file.Path link = tmp.resolve("link.txt");
+            java.nio.file.Files.createSymbolicLink(link, real);
+
+            MatchEngine engine = new MatchEngine();
+            com.webgrep.core.ContentExtractor extractor =
+                    new com.webgrep.core.ContentExtractor(10 * 1024 * 1024);
+
+            // Walk the directory: only real.txt should be seen, not link.txt
+            java.util.List<java.nio.file.Path> files;
+            try (var stream = java.nio.file.Files.walk(tmp)) {
+                files = stream
+                        .filter(p -> java.nio.file.Files.isRegularFile(p)
+                                && !java.nio.file.Files.isSymbolicLink(p))
+                        .sorted()
+                        .toList();
+            }
+            assertEquals("Only one non-symlink file should be scanned", 1, files.size());
+            assertEquals(real, files.get(0));
+        } finally {
+            // cleanup
+            try (var s = java.nio.file.Files.walk(tmp)) {
+                s.sorted(java.util.Comparator.reverseOrder())
+                 .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
+            }
+        }
+    }
+
+    @Test
+    public void testTotalMatchesRunningCounter() {
+        // P-01: getTotalMatches() must use the running counter, not recompute via stream
+        CrawlResult result = new CrawlResult();
+        assertEquals(0, result.getTotalMatches());
+        result.addMatch("http://a.com/p1", 5);
+        assertEquals(5, result.getTotalMatches());
+        result.addMatch("http://a.com/p2", 3);
+        assertEquals(8, result.getTotalMatches());
+        // Same URL visited again — count accumulates
+        result.addMatch("http://a.com/p1", 2);
+        assertEquals(10, result.getTotalMatches());
+    }
+
+    @Test
+    public void testNormalizeUrlRejectsJavascriptScheme() {
+        // B-23: javascript: URIs must never reach the fetcher
+        assertEquals("", UrlUtils.normalizeUrl("javascript:alert(1)", null));
+        assertEquals("", UrlUtils.normalizeUrl("javascript:void(0)", "https://example.com/"));
+    }
+
+    @Test
+    public void testNormalizeUrlRejectsDataScheme() {
+        // B-23: data: URIs must be filtered even though they contain text content
+        assertEquals("", UrlUtils.normalizeUrl("data:text/html,<h1>hi</h1>", null));
+    }
+
+    @Test
+    public void testNormalizeUrlRejectsFtpScheme() {
+        // B-23: ftp:// must be rejected (only http/https are crawlable)
+        assertEquals("", UrlUtils.normalizeUrl("ftp://files.example.com/readme.txt", null));
+    }
+
+    @Test
+    public void testSpaDetectionNotTriggeredBySingleAnalyticsScript() {
+        // B-11: a normal page with one analytics script and decent body text is NOT an SPA
+        String html = "<html><head><script src='analytics.js'></script></head>"
+                + "<body>Welcome to our site! This page has real content about products and services. "
+                + "Click here to learn more about what we offer.</body></html>";
+        org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(html);
+        assertFalse("Single analytics script + text > 100 chars must not trigger SPA",
+                com.webgrep.core.PlaywrightRenderer.isSpa(doc));
+    }
+
+    @Test
+    public void testSpaDetectionTriggeredOnEmptyBody() {
+        // B-11: a page with very short body text and any JS is still detected as SPA
+        String html = "<html><head><script src='app.js'></script></head>"
+                + "<body>Loading...</body></html>";
+        org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(html);
+        assertTrue("Very short body + JS bundle must still be detected as SPA",
+                com.webgrep.core.PlaywrightRenderer.isSpa(doc));
+    }
 }
