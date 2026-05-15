@@ -9,5 +9,5 @@ RUN mvn package -DskipTests -q
 # Stage 2: minimal runtime image
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-COPY --from=build /app/target/WebGrep-1.0.0.jar webgrep.jar
+COPY --from=build /app/target/WebGrep-1.1.0.jar webgrep.jar
 ENTRYPOINT ["java", "-jar", "webgrep.jar"]

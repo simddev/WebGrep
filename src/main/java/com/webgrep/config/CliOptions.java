@@ -172,9 +172,6 @@ public class CliOptions {
         if (!output.equals("text") && !output.equals("json")) {
             throw new IllegalArgumentException("Invalid output format: " + output + ". Use text or json.");
         }
-        if (!browser.equals("auto") && !browser.equals("firefox") && !browser.equals("chromium")) {
-            throw new IllegalArgumentException("Invalid browser: " + browser + ". Use auto, firefox, or chromium.");
-        }
     }
 
     public static void printHelp() {
