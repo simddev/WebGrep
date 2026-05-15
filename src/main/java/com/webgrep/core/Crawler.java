@@ -13,9 +13,11 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -100,6 +102,7 @@ public class Crawler {
         CrawlResult crawlResult = new CrawlResult();
         Deque<UrlDepth> queue = new LinkedList<>();
         PlaywrightRenderer renderer = null;
+        Set<String> spaRenderedDomains = new HashSet<>();
 
         String normalizedStart = UrlUtils.normalizeUrl(options.getUrl(), null);
         queue.addLast(new UrlDepth(normalizedStart, 0));
@@ -172,12 +175,16 @@ public class Crawler {
                             if (spaRenderingEnabled == null) {
                                 spaRenderingEnabled = promptSpaConsent(effectiveUrl);
                             }
-                            if (spaRenderingEnabled) {
+                            if (spaRenderingEnabled && !spaRenderedDomains.contains(extractHost(effectiveUrl))) {
+                                // Render via Playwright once per domain. Sub-routes of the same
+                                // SPA share the same app shell and API — re-rendering each one
+                                // via Playwright is redundant and extremely slow.
                                 if (renderer == null) {
                                     renderer = new PlaywrightRenderer(options.getTimeoutMs(), options.isInsecure(), options.getBrowser());
                                 }
                                 PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar);
                                 if (rendered != null) {
+                                    spaRenderedDomains.add(extractHost(effectiveUrl));
                                     content = rendered.text();
                                     if (current.depth < options.getDepth()) {
                                         List<String> allRenderedLinks = new ArrayList<>(rendered.links());
