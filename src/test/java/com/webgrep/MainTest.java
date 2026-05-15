@@ -52,6 +52,20 @@ public class MainTest {
     }
 
     @Test
+    public void testMatchEngineSingleCharFallbackSuppressed() {
+        MatchEngine engine = new MatchEngine();
+        // "(C)" strips to "c" and "C++" strips to "c" — a 1-char fallback must not
+        // match every line in a document; it should return 0 when the literal is absent.
+        assertEquals(0, engine.countMatches("GNU GENERAL PUBLIC LICENSE", "(C)", "default"));
+        assertEquals(0, engine.countMatches("Use the GNU General Public License", "C++", "default"));
+        assertEquals(0, engine.countMatches("GNU GENERAL PUBLIC LICENSE", "(C)", "fuzzy"));
+        // But the literal does match when it's actually present
+        assertEquals(1, engine.countMatches("Copyright (C) 2007 FSF", "(C)", "default"));
+        // And diacritic stripping still works for multi-char simplifications
+        assertEquals(1, engine.countMatches("Café is open", "cafe", "default"));
+    }
+
+    @Test
     public void testSuperSimplify() {
         MatchEngine engine = new MatchEngine();
         assertEquals("cafe", engine.superSimplify("Café"));

@@ -59,7 +59,9 @@ public class MatchEngine {
             if (count == 0) {
                 String simpleKeyword = superSimplify(keyword);
                 String simpleText = superSimplify(text);
-                if (!simpleKeyword.isEmpty()) {
+                // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
+                // don't degrade to a single letter that matches every word in the text.
+                if (simpleKeyword.length() >= 2) {
                     int idx = 0;
                     while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
                         count++;
@@ -75,7 +77,8 @@ public class MatchEngine {
         String superSimpleKeyword = superSimplify(keyword);
         String superSimpleText = superSimplify(text);
 
-        if (superSimpleKeyword.isEmpty()) return 0;
+        // Same guard as default mode: a 1-char simplified keyword (e.g. "C++" → "c") is not meaningful.
+        if (superSimpleKeyword.length() < 2) return 0;
 
         int count = 0;
         int idx = 0;
