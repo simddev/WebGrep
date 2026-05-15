@@ -17,6 +17,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Crawls a website starting from a seed URL and searches every visited page for a keyword.
@@ -179,24 +180,17 @@ public class Crawler {
                                 PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar);
                                 if (rendered != null) {
                                     content = rendered.text();
-                                    // Intercepted document links (PDFs, DOCXs from API responses) are
-                                    // always queued regardless of depth — they are binary documents that
-                                    // never generate further links, so following them costs one download
-                                    // only and does not expand the crawl graph.
-                                    for (String docLink : rendered.docLinks()) {
-                                        String normalized = UrlUtils.normalizeUrl(docLink, effectiveUrl);
-                                        if (normalized.isEmpty() || UrlUtils.isIgnoredLink(normalized)) continue;
-                                        if (!options.isAllowExternal() && !isSameDomain(extractHost(normalized))) continue;
-                                        if (!dedup.isDuplicate(normalized) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
-                                            dedup.markQueued(normalized);
-                                            if (options.isDfs()) queue.addFirst(new UrlDepth(normalized, current.depth + 1));
-                                            else queue.addLast(new UrlDepth(normalized, current.depth + 1));
-                                        }
-                                    }
                                     if (current.depth < options.getDepth()) {
-                                        // DOM navigation links are depth-gated so CSS/JS/image hrefs
-                                        // from the rendered DOM never reach the queue.
-                                        links = rendered.links().stream()
+                                        // From SPA pages, queue API-intercepted document links and any
+                                        // direct document download links (<a href="...pdf">) found in
+                                        // the rendered DOM. Angular navigation routes (no document
+                                        // extension) are intentionally skipped — each requires a full
+                                        // Playwright render and typically adds no content beyond what
+                                        // the API interception already captured.
+                                        links = Stream.concat(
+                                                rendered.docLinks().stream(),
+                                                rendered.links().stream().filter(UrlUtils::hasDocumentExtension)
+                                        )
                                                 .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
                                                 .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
                                                 .distinct()

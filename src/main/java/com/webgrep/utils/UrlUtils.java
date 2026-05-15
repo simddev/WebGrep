@@ -74,6 +74,26 @@ public class UrlUtils {
         }
     }
 
+    /**
+     * Returns true if the URL's path ends with a known document extension.
+     * Used to distinguish document download links from SPA navigation routes.
+     */
+    public static boolean hasDocumentExtension(String url) {
+        String path = url.toLowerCase();
+        int q = path.indexOf('?');
+        if (q >= 0) path = path.substring(0, q);
+        int dot = path.lastIndexOf('.');
+        int slash = path.lastIndexOf('/');
+        if (dot < 0 || dot < slash) return false;
+        String ext = path.substring(dot + 1);
+        return switch (ext) {
+            case "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+                 "odt", "ods", "odp", "epub", "txt", "csv", "rtf",
+                 "pages", "numbers", "key" -> true;
+            default -> false;
+        };
+    }
+
     public static boolean isIgnoredLink(String url) {
         String lower = url.toLowerCase();
         int hashIdx = lower.indexOf('#');
