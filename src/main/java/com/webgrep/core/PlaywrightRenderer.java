@@ -53,7 +53,7 @@ public class PlaywrightRenderer implements AutoCloseable {
     private final boolean insecure;
     private final String preferredBrowser; // null/"auto", "firefox", or "chromium"
 
-    public record RenderedPage(String text, List<String> links) {}
+    public record RenderedPage(String text, List<String> links, List<String> docLinks) {}
 
     public PlaywrightRenderer(int timeoutMs, boolean insecure, String preferredBrowser) {
         this.timeoutMs = timeoutMs;
@@ -115,10 +115,10 @@ public class PlaywrightRenderer implements AutoCloseable {
                         .filter(Objects::nonNull)
                         .collect(Collectors.toList());
 
-                List<String> allLinks = new ArrayList<>(domLinks);
-                allLinks.addAll(interceptedLinks);
-                return new RenderedPage(text != null ? text : "",
-                        allLinks.stream().distinct().collect(Collectors.toList()));
+                return new RenderedPage(
+                        text != null ? text : "",
+                        domLinks.stream().distinct().collect(Collectors.toList()),
+                        interceptedLinks.stream().distinct().collect(Collectors.toList()));
             }
         } catch (Exception e) {
             unavailable = true;

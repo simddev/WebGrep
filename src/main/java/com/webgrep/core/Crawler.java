@@ -179,9 +179,23 @@ public class Crawler {
                                 PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar);
                                 if (rendered != null) {
                                     content = rendered.text();
+                                    // Intercepted document links (PDFs, DOCXs from API responses) are
+                                    // always queued regardless of depth — they are binary documents that
+                                    // never generate further links, so following them costs one download
+                                    // only and does not expand the crawl graph.
+                                    for (String docLink : rendered.docLinks()) {
+                                        String normalized = UrlUtils.normalizeUrl(docLink, effectiveUrl);
+                                        if (normalized.isEmpty() || UrlUtils.isIgnoredLink(normalized)) continue;
+                                        if (!options.isAllowExternal() && !isSameDomain(extractHost(normalized))) continue;
+                                        if (!dedup.isDuplicate(normalized) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
+                                            dedup.markQueued(normalized);
+                                            if (options.isDfs()) queue.addFirst(new UrlDepth(normalized, current.depth + 1));
+                                            else queue.addLast(new UrlDepth(normalized, current.depth + 1));
+                                        }
+                                    }
                                     if (current.depth < options.getDepth()) {
-                                        // Normalize and filter SPA links the same way HTML links are filtered,
-                                        // so CSS/JS/image hrefs from the rendered DOM never reach the queue.
+                                        // DOM navigation links are depth-gated so CSS/JS/image hrefs
+                                        // from the rendered DOM never reach the queue.
                                         links = rendered.links().stream()
                                                 .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
                                                 .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
