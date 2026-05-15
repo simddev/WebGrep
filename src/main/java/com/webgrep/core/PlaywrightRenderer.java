@@ -48,6 +48,12 @@ public class PlaywrightRenderer implements AutoCloseable {
 
     private Playwright playwright;
     private Browser browser;
+    private BrowserContext persistentContext;
+    private Page persistentPage;
+    private String persistentBaseUrl;
+    // Shared state for the persistent page's response interceptor; cleared before each navigation.
+    private final List<String> interceptedLinks = Collections.synchronizedList(new ArrayList<>());
+    private String interceptorUrlBase = "";
     private boolean unavailable = false;
     private final int timeoutMs;
     private final boolean insecure;
@@ -80,46 +86,107 @@ public class PlaywrightRenderer implements AutoCloseable {
         if (unavailable) return null;
         try {
             ensureReady();
-            Browser.NewContextOptions ctxOpts = new Browser.NewContextOptions()
-                    .setIgnoreHTTPSErrors(insecure);
-            try (BrowserContext context = browser.newContext(ctxOpts)) {
-                passCookies(context, cookies, url);
-                Page page = context.newPage();
-                page.setDefaultTimeout(timeoutMs);
+            String urlBase = baseUrl(url);
 
-                // Intercept JSON API responses to capture document download URLs that
-                // the SPA serves via click handlers rather than plain <a href> links.
-                List<String> interceptedLinks = Collections.synchronizedList(new ArrayList<>());
-                String urlBase = baseUrl(url);
-                page.onResponse(response -> captureDocLinks(response, urlBase, interceptedLinks));
-
-                try {
-                    page.navigate(url);
-                } catch (TimeoutError e) {
-                    // Navigation itself timed out — return null for this page but keep the
-                    // renderer alive; a slow page shouldn't disable SPA rendering entirely.
-                    return null;
-                }
-                try {
-                    page.waitForLoadState(LoadState.NETWORKIDLE,
-                            new Page.WaitForLoadStateOptions().setTimeout(Math.min(timeoutMs, 15_000)));
-                } catch (TimeoutError ignored) {}
-
-                String text = (String) page.evaluate("document.body ? document.body.innerText : ''");
-
-                // Standard <a href> links from the rendered DOM
-                List<String> domLinks = page.querySelectorAll("a[href]").stream()
-                        .map(el -> el.getAttribute("href"))
-                        .filter(href -> href != null && !href.isBlank())
-                        .map(href -> resolveLink(href, url))
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-
-                return new RenderedPage(
-                        text != null ? text : "",
-                        domLinks.stream().distinct().collect(Collectors.toList()),
-                        interceptedLinks.stream().distinct().collect(Collectors.toList()));
+            // Keep a single BrowserContext and Page alive across renders on the same domain.
+            // For SPA sub-routes, this means the JavaScript bundle is already loaded and the
+            // router just swaps components — typically 1–3 s instead of 10–15 s per page.
+            boolean needsNewPage = persistentPage == null || persistentPage.isClosed()
+                    || !urlBase.equals(persistentBaseUrl);
+            if (needsNewPage) {
+                closePersistentContext();
+                Browser.NewContextOptions ctxOpts = new Browser.NewContextOptions()
+                        .setIgnoreHTTPSErrors(insecure);
+                persistentContext = browser.newContext(ctxOpts);
+                // Block images, fonts, stylesheets and media — they add no text content and
+                // slow down navigation + delay NETWORKIDLE by triggering extra resource fetches.
+                persistentContext.route("**/*", route -> {
+                    String rt = route.request().resourceType();
+                    if ("document".equals(rt) || "script".equals(rt)
+                            || "xhr".equals(rt) || "fetch".equals(rt)) {
+                        route.resume();
+                    } else {
+                        route.abort();
+                    }
+                });
+                persistentPage = persistentContext.newPage();
+                persistentPage.setDefaultTimeout(timeoutMs);
+                persistentPage.onResponse(
+                        response -> captureDocLinks(response, this.interceptorUrlBase, this.interceptedLinks));
+                persistentBaseUrl = urlBase;
             }
+            passCookies(persistentContext, cookies, url);
+
+            interceptedLinks.clear();
+            interceptorUrlBase = urlBase;
+
+            try {
+                persistentPage.navigate(url);
+            } catch (TimeoutError e) {
+                // Navigation itself timed out — return null for this page but keep the
+                // renderer alive; a slow page shouldn't disable SPA rendering entirely.
+                return null;
+            }
+
+            int idleTimeout = needsNewPage ? Math.min(timeoutMs, 15_000) : Math.min(timeoutMs, 5_000);
+            // Wait for DOM to be interactive first (always fires, cheap).
+            try {
+                persistentPage.waitForLoadState(LoadState.DOMCONTENTLOADED,
+                        new Page.WaitForLoadStateOptions().setTimeout(idleTimeout));
+            } catch (TimeoutError ignored) {}
+            if (needsNewPage) {
+                // First navigation to this domain: wait for full network idle so that the
+                // initial API responses (e.g. the full document list on the seed page) are
+                // captured by the response interceptor before we snapshot links.
+                try {
+                    persistentPage.waitForLoadState(LoadState.NETWORKIDLE,
+                            new Page.WaitForLoadStateOptions().setTimeout(idleTimeout));
+                } catch (TimeoutError ignored) {}
+            } else {
+                // Subsequent same-domain SPA navigations: the router just swaps components.
+                // Wait until the content area has non-trivial text — resolves as soon as the
+                // route renders (typically 150–400 ms) instead of the full NETWORKIDLE tail.
+                try {
+                    persistentPage.waitForFunction(
+                            "() => { const r = document.querySelector("
+                            + "'main, [role=main], router-outlet + *, app-root > *') "
+                            + "|| document.body; return r && r.innerText.trim().length > 100; }",
+                            null,
+                            new Page.WaitForFunctionOptions()
+                                    .setTimeout(idleTimeout)
+                                    .setPollingInterval(50));
+                } catch (TimeoutError ignored) {}
+            }
+
+            // Single evaluate round-trip: extract both innerText and resolved hrefs together.
+            // Previous approach called querySelectorAll then getAttribute per element — one
+            // IPC call per anchor (80+ on some pages), adding ~150ms and leaking ElementHandles.
+            @SuppressWarnings("unchecked")
+            Map<String, Object> snapshot = (Map<String, Object>) persistentPage.evaluate(
+                    "(base) => {"
+                    + "  const ls = [];"
+                    + "  for (const a of document.querySelectorAll('a[href]')) {"
+                    + "    const h = a.getAttribute('href');"
+                    + "    if (!h || h.startsWith('javascript:') || h.startsWith('mailto:')"
+                    + "        || h.startsWith('#')) continue;"
+                    + "    try { ls.push(new URL(h, base).toString()); } catch(_) {}"
+                    + "  }"
+                    + "  return { text: document.body ? document.body.innerText : '',"
+                    + "           links: [...new Set(ls)] };"
+                    + "}", url);
+
+            String text = snapshot != null ? (String) snapshot.get("text") : "";
+            @SuppressWarnings("unchecked")
+            List<String> domLinks = snapshot != null
+                    ? (List<String>) snapshot.get("links")
+                    : new ArrayList<>();
+
+            List<String> captured = new ArrayList<>(interceptedLinks);
+
+            return new RenderedPage(
+                    text != null ? text : "",
+                    domLinks != null ? domLinks : new ArrayList<>(),
+                    captured.stream().distinct().collect(Collectors.toList()));
         } catch (Exception e) {
             unavailable = true;
             String cause = e.getMessage() != null
@@ -129,6 +196,15 @@ public class PlaywrightRenderer implements AutoCloseable {
                     + "  JavaScript-rendered pages will return no results.%n%n", cause);
             return null;
         }
+    }
+
+    private void closePersistentContext() {
+        if (persistentContext != null) {
+            try { persistentContext.close(); } catch (Exception ignored) {}
+            persistentContext = null;
+            persistentPage = null;
+        }
+        persistentBaseUrl = null;
     }
 
     /**
@@ -353,18 +429,9 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
-    private String resolveLink(String href, String baseUrl) {
-        if (href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("#"))
-            return null;
-        try {
-            return new URL(new URL(baseUrl), href).toString();
-        } catch (MalformedURLException e) {
-            return null;
-        }
-    }
-
     @Override
     public void close() {
+        closePersistentContext();
         if (browser != null) try { browser.close(); } catch (Exception ignored) {}
         if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
     }
