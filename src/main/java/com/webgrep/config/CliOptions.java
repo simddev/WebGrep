@@ -192,7 +192,7 @@ public class CliOptions {
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -a, --all-urls           Disable smart URL deduplication; visit every URL regardless of query parameters");
-        System.out.println("  -n, --max-hits <n>       Stop crawling after finding n total matches (default: 0 = no limit)");
+        System.out.println("  -n, --max-hits <n>       Stop after finding n total matches (default: 0 = no limit); applies to web crawl and folder scan");
         System.out.println("  -s, --dfs                Use depth-first search instead of breadth-first search");
         System.out.println("  -e, --allow-external     Allow crawling external domains");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");

@@ -13,7 +13,7 @@ WebGrep is a high-performance CLI keyword search tool with three modes: **web cr
 ### Option 1 — Native JAR (requires Java 17+)
 ```bash
 mvn package
-java -jar target/WebGrep-1.1.0.jar -u https://example.com -k "your keyword"
+java -jar target/WebGrep-1.1.1.jar -u https://example.com -k "your keyword"
 ```
 
 ### Option 2 — Docker (no Java required)
@@ -66,7 +66,6 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 - `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000).
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-n, --max-hits <n>`: Stop as soon as N total matches are found (default: 0 = no limit). Pairs well with `--dfs` to surface deeply buried results quickly, or with BFS (default) to find the first N most prominent matches.
 - `-a, --all-urls`: Disable smart URL deduplication. By default, `page?id=1&sort=asc` is treated as a variant of `page?id=1` and skipped. Use this flag to visit every URL regardless.
 - `-s, --dfs`: Use depth-first search instead of the default breadth-first. BFS covers the site level by level; DFS follows each link chain as deep as possible before backtracking.
 - `-e, --allow-external`: Follow links outside the starting domain.
@@ -77,6 +76,7 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 - `--install-browser`: Pre-install a browser for SPA rendering and exit without crawling. Useful for one-time setup before running WebGrep in a non-interactive environment. Respects `--browser` preference.
 
 **General:**
+- `-n, --max-hits <n>`: Stop after N total matches are found (default: 0 = no limit). Applies to both web crawl and folder scan. The check fires after each page or file completes — a single page/file may contribute more matches than the limit before the search stops. Pairs well with `--dfs` for web crawl to surface deeply buried results quickly.
 - `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to web downloads and local files.
 - `-o, --output <format>`: Output format: `text` (default) or `json`.
 - `-h, --help`: Show help message.
