@@ -117,13 +117,19 @@ public class BrowserFinder {
                 Process proc = new ProcessBuilder(cmd, name)
                         .redirectErrorStream(true)
                         .start();
-                String line = new String(proc.getInputStream().readAllBytes())
-                        .trim().lines().findFirst().orElse("");
+                String line;
+                try (var in = proc.getInputStream()) {
+                    line = new String(in.readAllBytes()).trim().lines().findFirst().orElse("");
+                }
                 if (!line.isEmpty() && proc.waitFor() == 0) {
                     Path p = Path.of(line);
                     if (Files.isExecutable(p)) return Optional.of(p);
                 }
-            } catch (IOException | InterruptedException ignored) {}
+            } catch (IOException ignored) {
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Optional.empty();
+            }
         }
         return Optional.empty();
     }

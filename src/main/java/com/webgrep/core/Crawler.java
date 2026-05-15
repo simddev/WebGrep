@@ -44,7 +44,8 @@ public class Crawler {
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
 
     private int spinnerIdx = 0;
-    private final Map<String, String> cookieJar = new HashMap<>();
+    // Cookies scoped by host to avoid leaking credentials across domains under --allow-external.
+    private final Map<String, Map<String, String>> cookieJar = new HashMap<>();
     private Boolean spaRenderingEnabled = null; // null = not yet asked, true/false = decided
 
     private final CliOptions options;
@@ -55,6 +56,7 @@ public class Crawler {
     private final int maxBodySize;
     private final UrlDeduplicator dedup;
     private final SSLSocketFactory insecureSslFactory;
+    private final HostnameVerifier originalHostnameVerifier;
 
     public Crawler(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine) {
         this.options = options;
@@ -71,9 +73,11 @@ public class Crawler {
             this.insecureSslFactory = buildInsecureSslFactory();
             // Jsoup has no per-connection hostname verifier API; this global setter is the
             // minimal remaining side effect of --insecure. It only runs when explicitly requested.
+            this.originalHostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier();
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
         } else {
             this.insecureSslFactory = null;
+            this.originalHostnameVerifier = null;
         }
     }
 
@@ -110,10 +114,10 @@ public class Crawler {
                 UrlDepth current = queue.pollFirst();
 
                 try {
-                    Thread.sleep(options.getDelayMs());
+                    if (crawlResult.visitedCount > 0) Thread.sleep(options.getDelayMs());
 
                     org.jsoup.Connection.Response response = fetchWithRetry(current.url);
-                    cookieJar.putAll(response.cookies());
+                    storeCookies(response.url().toString(), response.cookies());
                     // Use the final URL after redirects as the canonical URL for this page
                     String effectiveUrl = response.url().toString();
                     // If the server redirected us, mark the effective URL as queued so that
@@ -155,7 +159,13 @@ public class Crawler {
                     List<String> links = new ArrayList<>();
 
                     if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
-                        Document doc = response.parse();
+                        Document doc;
+                        try {
+                            doc = response.parse();
+                        } catch (Exception e) {
+                            crawlResult.incrementError(CrawlResult.ErrorType.PARSE_ERROR);
+                            continue;
+                        }
 
                         if (doc.title().contains("Just a moment...") || doc.text().contains("Enable JavaScript and cookies to continue")) {
                             crawlResult.addBlocked(effectiveUrl, "Cloudflare/Bot protection challenge");
@@ -168,7 +178,7 @@ public class Crawler {
                             links = extractor.extractLinks(doc, body, effectiveUrl);
                         }
 
-                        if (PlaywrightRenderer.isSpa(doc)) {
+                        if (!Boolean.FALSE.equals(spaRenderingEnabled) && PlaywrightRenderer.isSpa(doc)) {
                             if (spaRenderingEnabled == null) {
                                 spaRenderingEnabled = promptSpaConsent(effectiveUrl);
                             }
@@ -176,12 +186,14 @@ public class Crawler {
                                 if (renderer == null) {
                                     renderer = new PlaywrightRenderer(options.getTimeoutMs(), options.isInsecure(), options.getBrowser());
                                 }
-                                PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar);
+                                PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookiesFor(effectiveUrl));
                                 if (rendered != null) {
                                     content = rendered.text();
+                                    storeCookies(effectiveUrl, rendered.cookies());
                                     if (current.depth < options.getDepth()) {
                                         List<String> allRenderedLinks = new ArrayList<>(rendered.docLinks());
                                         allRenderedLinks.addAll(rendered.links());
+                                        allRenderedLinks.addAll(links); // preserve any static links Jsoup found
                                         links = allRenderedLinks.stream()
                                                 .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
                                                 .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
@@ -228,6 +240,9 @@ public class Crawler {
                     } else {
                         crawlResult.addNetworkError("HTTP " + e.getStatusCode());
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 } catch (Exception e) {
                     crawlResult.addNetworkError(e);
                 }
@@ -242,6 +257,9 @@ public class Crawler {
             }
         } finally {
             if (renderer != null) renderer.close();
+            if (originalHostnameVerifier != null) {
+                HttpsURLConnection.setDefaultHostnameVerifier(originalHostnameVerifier);
+            }
         }
 
         System.err.print("\r" + " ".repeat(110) + "\r");
@@ -262,7 +280,7 @@ public class Crawler {
                     .followRedirects(true)
                     .ignoreContentType(true)
                     .ignoreHttpErrors(true) // so we can read Retry-After before deciding to retry
-                    .cookies(cookieJar)
+                    .cookies(cookiesFor(url))
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                     .header("Accept-Language", "en-US,en;q=0.9,bs;q=0.8,sr;q=0.7,hr;q=0.6")
                     .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
@@ -277,6 +295,8 @@ public class Crawler {
                         + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + url);
                 Thread.sleep(waitMs);
             } else if (status >= 400) {
+                // Preserve cookies from error responses (e.g. session tokens set during 401 challenges)
+                storeCookies(url, response.cookies());
                 throw new org.jsoup.HttpStatusException("HTTP error fetching URL", status, url);
             } else {
                 return response;
@@ -313,6 +333,15 @@ public class Crawler {
     }
 
     private boolean promptSpaConsent(String url) {
+        java.io.Console console = System.console();
+        if (console == null) {
+            // Non-interactive session: proceed silently. If a system browser or
+            // Playwright-cached browser is available no download will happen.
+            // If no browser is found, PlaywrightRenderer will refuse to download
+            // without a TTY and mark itself unavailable — SPA pages will be skipped.
+            return true;
+        }
+
         System.err.println();
         System.err.println("  The page at " + url);
         System.err.println("  is a JavaScript-rendered single-page application (Angular, React, or Vue).");
@@ -326,19 +355,27 @@ public class Crawler {
         System.err.print("  Enable JavaScript rendering for this session? [Y/n]: ");
 
         try {
-            java.io.Console console = System.console();
-            if (console != null) {
-                String line = console.readLine();
-                if (line != null && line.trim().equalsIgnoreCase("n")) {
-                    System.err.println();
-                    System.err.println("  JavaScript rendering disabled — SPA pages will return no content.");
-                    System.err.println();
-                    return false;
-                }
+            String line = console.readLine();
+            if (line != null && line.trim().equalsIgnoreCase("n")) {
+                System.err.println();
+                System.err.println("  JavaScript rendering disabled — SPA pages will return no content.");
+                System.err.println();
+                return false;
             }
         } catch (Exception ignored) {}
         System.err.println();
         return true;
+    }
+
+    private Map<String, String> cookiesFor(String url) {
+        return cookieJar.getOrDefault(extractHost(url), Map.of());
+    }
+
+    private void storeCookies(String url, Map<String, String> cookies) {
+        if (cookies.isEmpty()) return;
+        String host = extractHost(url);
+        if (host.isEmpty()) return;
+        cookieJar.computeIfAbsent(host, k -> new HashMap<>()).putAll(cookies);
     }
 
     private void printProgress(String currentUrl, int visited, int matches) {

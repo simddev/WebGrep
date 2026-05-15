@@ -101,7 +101,9 @@ public class Main {
 
         List<Path> files;
         try (var stream = Files.walk(dir.toPath())) {
-            files = stream.filter(Files::isRegularFile).sorted().toList();
+            files = stream
+                    .filter(p -> Files.isRegularFile(p) && !Files.isSymbolicLink(p))
+                    .sorted().toList();
         }
 
         List<FileScanResult> results = new ArrayList<>();

@@ -31,6 +31,7 @@ public class CrawlResult {
     public int docsCount = 0;
     public long durationMs = 0;
     public int stoppedAtMaxHits = 0; // 0 = ran to completion; >0 = stopped when this limit was hit
+    private int totalMatches = 0;
 
     public CrawlResult() {
         for (ErrorType type : ErrorType.values()) {
@@ -39,11 +40,12 @@ public class CrawlResult {
     }
 
     public int getTotalMatches() {
-        return results.values().stream().mapToInt(Integer::intValue).sum();
+        return totalMatches;
     }
 
     public void addMatch(String url, int count) {
-        results.put(url, count);
+        results.merge(url, count, Integer::sum);
+        totalMatches += count;
     }
 
     public void addBlocked(String url, String reason) {

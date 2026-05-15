@@ -49,7 +49,11 @@ public class ContentExtractor {
 
     public ContentExtractor(long maxBytes) {
         this.tika = new Tika();
-        this.tika.setMaxStringLength((int) Math.min(maxBytes, Integer.MAX_VALUE));
+        // Cap Tika's string output independently of the download/file-size limit.
+        // A small --max-bytes (e.g. 500 KB set to throttle downloads) must not silently
+        // truncate text extracted from local documents in --file / --folder mode.
+        int tikaLimit = (int) Math.min(Math.max(maxBytes, 50L * 1024 * 1024), Integer.MAX_VALUE);
+        this.tika.setMaxStringLength(tikaLimit);
     }
 
     public String extractTextFromHtml(Document doc) {
@@ -115,7 +119,7 @@ public class ContentExtractor {
             }
         }
 
-        if (links.size() < MAX_LINKS_PER_PAGE) {
+        if (elements.isEmpty()) {
             String bodyStr = new String(rawBody, StandardCharsets.UTF_8);
             Matcher linkMatcher = LINK_PATTERN.matcher(bodyStr);
             while (linkMatcher.find() && links.size() < MAX_LINKS_PER_PAGE) {

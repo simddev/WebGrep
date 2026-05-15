@@ -68,9 +68,13 @@ public class CliOptions {
             }
 
             if (key != null) {
-                if (hasValue && i + 1 < args.length && (!args[i + 1].startsWith("-") || args[i + 1].matches("-\\d.*"))) {
-                    params.put(key, args[i + 1]);
-                    i++;
+                if (hasValue) {
+                    if (i + 1 < args.length && (!args[i + 1].startsWith("-") || args[i + 1].matches("-\\d.*"))) {
+                        params.put(key, args[i + 1]);
+                        i++;
+                    } else {
+                        throw new IllegalArgumentException("Option --" + key + " requires a value but none was given");
+                    }
                 } else {
                     params.put(key, "true");
                 }
@@ -156,7 +160,9 @@ public class CliOptions {
         if (inputCount == 0)
             throw new IllegalArgumentException("Specify a target: --url <URL>, --file <path>, or --folder <path>");
         if (url != null) {
-            if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") && !url.startsWith("http://") && !url.startsWith("https://"))
+            // Reject any explicit scheme that is not http(s): covers both "ftp://x" and "javascript:x"
+            if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")
+                    && !url.startsWith("http://") && !url.startsWith("https://"))
                 throw new IllegalArgumentException("URL scheme must be http or https");
         }
         if (keyword == null || keyword.isBlank()) throw new IllegalArgumentException("Keyword is required (-k, --keyword)");

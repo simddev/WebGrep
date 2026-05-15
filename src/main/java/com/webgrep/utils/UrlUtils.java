@@ -2,6 +2,7 @@ package com.webgrep.utils;
 
 import java.text.Normalizer;
 import java.net.URL;
+import java.util.regex.Pattern;
 
 /**
  * Utility methods for URL normalisation and link filtering.
@@ -17,6 +18,8 @@ import java.net.URL;
  */
 public class UrlUtils {
 
+    private static final Pattern DOUBLE_SLASH = Pattern.compile("/{2,}");
+
     public static String normalizeUrl(String urlString, String baseUrlString) {
         if (urlString == null || urlString.isEmpty()) {
             return "";
@@ -27,6 +30,13 @@ public class UrlUtils {
             } else {
                 urlString = "http:" + urlString;
             }
+        }
+        // Reject non-http(s) schemes immediately so that javascript:, data:, ftp:, etc.
+        // never reach the fetcher even if they somehow survive as absolute-looking strings.
+        if (urlString.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")) {
+            int colon = urlString.indexOf(':');
+            String scheme = urlString.substring(0, colon).toLowerCase();
+            if (!scheme.equals("http") && !scheme.equals("https")) return "";
         }
         if (!urlString.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*")) {
             if (baseUrlString != null && !baseUrlString.isEmpty()) {
@@ -57,7 +67,7 @@ public class UrlUtils {
             if (path.isEmpty()) {
                 path = "/";
             }
-            path = path.replaceAll("/{2,}", "/");
+            path = DOUBLE_SLASH.matcher(path).replaceAll("/");
 
             StringBuilder sb = new StringBuilder();
             sb.append(protocol).append("://").append(host);
@@ -70,28 +80,8 @@ public class UrlUtils {
             }
             return sb.toString();
         } catch (Exception e) {
-            return urlString;
+            return "";
         }
-    }
-
-    /**
-     * Returns true if the URL's path ends with a known document extension.
-     * Used to distinguish document download links from SPA navigation routes.
-     */
-    public static boolean hasDocumentExtension(String url) {
-        String path = url.toLowerCase();
-        int q = path.indexOf('?');
-        if (q >= 0) path = path.substring(0, q);
-        int dot = path.lastIndexOf('.');
-        int slash = path.lastIndexOf('/');
-        if (dot < 0 || dot < slash) return false;
-        String ext = path.substring(dot + 1);
-        return switch (ext) {
-            case "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-                 "odt", "ods", "odp", "epub", "txt", "csv", "rtf",
-                 "pages", "numbers", "key" -> true;
-            default -> false;
-        };
     }
 
     public static boolean isIgnoredLink(String url) {

@@ -30,7 +30,7 @@ public class ReportWriter {
         System.out.println("Duration: " + formatDuration(crawlResult.durationMs));
         System.out.println("Total matches found: " + totalCount);
         System.out.println("Pages visited: " + crawlResult.visitedCount);
-        System.out.println("  HTML pages: " + (crawlResult.parsedCount - crawlResult.docsCount));
+        System.out.println("  HTML pages: " + Math.max(0, crawlResult.parsedCount - crawlResult.docsCount));
         System.out.println("  Documents:  " + crawlResult.docsCount);
 
         boolean hasErrors = crawlResult.errorCounts.values().stream().anyMatch(c -> c > 0);
