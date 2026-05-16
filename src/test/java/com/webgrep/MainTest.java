@@ -115,6 +115,15 @@ public class MainTest {
     }
 
     @Test
+    public void testFindSnippetsCatchesDiacriticVariant() {
+        MatchEngine engine = new MatchEngine();
+        // "Tomas" (ASCII) must match "Tomáš" (diacritic) via simplified pass and show original text
+        List<String> snips = engine.findSnippets("Kontaktni osoba je Tomáš Novák ze dne 2024.", "Tomas", "default", 3);
+        assertEquals(1, snips.size());
+        assertTrue(snips.get(0).contains("Tomáš"));
+    }
+
+    @Test
     public void testCliOptions() {
         String[] args = {"-u", "http://example.com", "-k", "test", "-d", "2", "-m", "exact"};
         CliOptions options = CliOptions.parse(args);
