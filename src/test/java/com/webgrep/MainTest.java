@@ -73,6 +73,48 @@ public class MainTest {
     }
 
     @Test
+    public void testFindSnippetsBasic() {
+        MatchEngine engine = new MatchEngine();
+        // Two "hello" occurrences far enough apart that their context windows produce distinct snippets
+        String text = "Hello there " + "word ".repeat(20) + "saying hello again at the end";
+        List<String> snips = engine.findSnippets(text, "hello", "default", 5);
+        assertEquals(2, snips.size());
+        assertTrue(snips.get(0).toLowerCase().contains("hello"));
+    }
+
+    @Test
+    public void testFindSnippetsRespectsMaxSnippets() {
+        MatchEngine engine = new MatchEngine();
+        // Four occurrences spaced far apart; ask for max 2
+        String text = "fox alpha " + "word ".repeat(20) + "fox beta " + "word ".repeat(20) + "fox gamma " + "word ".repeat(20) + "fox delta";
+        List<String> snips = engine.findSnippets(text, "fox", "default", 2);
+        assertEquals(2, snips.size());
+    }
+
+    @Test
+    public void testFindSnippetsIncludesSurroundingContext() {
+        MatchEngine engine = new MatchEngine();
+        List<String> snips = engine.findSnippets("The quick brown fox jumps over the lazy dog", "fox", "default", 3);
+        assertEquals(1, snips.size());
+        assertTrue(snips.get(0).contains("brown fox jumps"));
+    }
+
+    @Test
+    public void testFindSnippetsEmptyTextReturnsEmpty() {
+        MatchEngine engine = new MatchEngine();
+        assertEquals(0, engine.findSnippets("", "fox", "default", 3).size());
+        assertEquals(0, engine.findSnippets(null, "fox", "default", 3).size());
+    }
+
+    @Test
+    public void testFindSnippetsExactModeIsCaseSensitive() {
+        MatchEngine engine = new MatchEngine();
+        List<String> snips = engine.findSnippets("Hello world, hello there", "hello", "exact", 5);
+        assertEquals(1, snips.size());
+        assertTrue(snips.get(0).contains("hello there"));
+    }
+
+    @Test
     public void testCliOptions() {
         String[] args = {"-u", "http://example.com", "-k", "test", "-d", "2", "-m", "exact"};
         CliOptions options = CliOptions.parse(args);

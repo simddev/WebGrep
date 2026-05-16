@@ -1,6 +1,10 @@
 package com.webgrep.core;
 
 import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -77,6 +81,28 @@ public class MatchEngine {
             }
             return count;
         }
+    }
+
+    public List<String> findSnippets(String text, String keyword, String mode, int maxSnippets) {
+        if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) return List.of();
+
+        // Flatten whitespace so snippets read cleanly as a single line
+        String flat = text.replace(' ', ' ').replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
+
+        List<String> results = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        Pattern p = mode.equals("exact") ? getPattern(keyword, "exact") : getPattern(keyword, "default");
+        Matcher m = p.matcher(flat);
+        while (m.find() && results.size() < maxSnippets) {
+            int lo = Math.max(0, m.start() - 60);
+            int hi = Math.min(flat.length(), m.end() + 60);
+            while (lo > 0 && flat.charAt(lo - 1) != ' ') lo--;
+            while (hi < flat.length() && flat.charAt(hi) != ' ') hi++;
+            String snippet = (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
+            if (seen.add(snippet)) results.add(snippet);
+        }
+        return results;
     }
 
     private int countFuzzyMatches(String text, String keyword) {

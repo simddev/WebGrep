@@ -212,6 +212,8 @@ public class Crawler {
                     int count = matchEngine.countMatches(content, options.getKeyword(), options.getMode());
                     if (count > 0) {
                         crawlResult.addMatch(effectiveUrl, count);
+                        crawlResult.addSnippets(effectiveUrl,
+                                matchEngine.findSnippets(content, options.getKeyword(), options.getMode(), 3));
                     }
 
                     if (current.depth < options.getDepth()) {
