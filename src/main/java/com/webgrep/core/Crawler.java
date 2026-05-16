@@ -219,7 +219,6 @@ public class Crawler {
 
                     if (current.depth < options.getDepth()) {
                         for (String link : links) {
-                            if (!options.isFollowHtml() && !hasDocumentExtension(link)) continue;
                             if (!options.isAllowExternal()) {
                                 String linkHost = extractHost(link);
                                 if (!isSameDomain(linkHost)) {
