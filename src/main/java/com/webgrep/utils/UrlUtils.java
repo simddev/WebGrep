@@ -84,6 +84,17 @@ public class UrlUtils {
         }
     }
 
+    public static boolean isDocumentLink(String url) {
+        String lower = url.toLowerCase();
+        int hashIdx = lower.indexOf('#');
+        if (hashIdx != -1) lower = lower.substring(0, hashIdx);
+        int queryIdx = lower.indexOf('?');
+        if (queryIdx != -1) lower = lower.substring(0, queryIdx);
+        return lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")
+            || lower.endsWith(".txt") || lower.endsWith(".xlsx") || lower.endsWith(".odt")
+            || lower.endsWith(".pptx") || lower.endsWith(".csv");
+    }
+
     public static boolean isIgnoredLink(String url) {
         String lower = url.toLowerCase();
         int hashIdx = lower.indexOf('#');
@@ -96,7 +107,7 @@ public class UrlUtils {
             lower = lower.substring(0, queryIdx);
         }
 
-        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx") || lower.endsWith(".txt")) {
+        if (isDocumentLink(url)) {
             return false;
         }
 

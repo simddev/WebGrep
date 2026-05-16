@@ -157,7 +157,10 @@ public class Crawler {
 
                     String contentType = response.contentType();
                     String content;
-                    List<String> links = new ArrayList<>();
+                    // navLinks respect the depth limit; docLinksToEnqueue bypass it because
+                    // documents are leaves — they don't spawn further crawl levels.
+                    List<String> navLinks = new ArrayList<>();
+                    List<String> docLinksToEnqueue = new ArrayList<>();
 
                     if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
                         Document doc;
@@ -175,8 +178,10 @@ public class Crawler {
 
                         crawlResult.parsedCount++;
                         content = extractor.extractTextFromHtml(doc);
-                        if (current.depth < options.getDepth()) {
-                            links = extractor.extractLinks(doc, body, effectiveUrl);
+                        // Split Jsoup links into document links (depth-free) and navigation links.
+                        for (String l : extractor.extractLinks(doc, body, effectiveUrl)) {
+                            if (UrlUtils.isDocumentLink(l)) docLinksToEnqueue.add(l);
+                            else navLinks.add(l);
                         }
 
                         if (!Boolean.FALSE.equals(spaRenderingEnabled) && PlaywrightRenderer.isSpa(doc)) {
@@ -191,16 +196,18 @@ public class Crawler {
                                 if (rendered != null) {
                                     content = rendered.text();
                                     storeCookies(effectiveUrl, rendered.cookies());
-                                    if (current.depth < options.getDepth()) {
-                                        List<String> allRenderedLinks = new ArrayList<>(rendered.docLinks());
-                                        allRenderedLinks.addAll(rendered.links());
-                                        allRenderedLinks.addAll(links); // preserve any static links Jsoup found
-                                        links = allRenderedLinks.stream()
-                                                .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
-                                                .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
-                                                .distinct()
-                                                .collect(Collectors.toList());
-                                    }
+                                    // Rendered docLinks (JSON-intercepted + a[download] DOM links) bypass depth.
+                                    rendered.docLinks().stream()
+                                            .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
+                                            .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
+                                            .distinct()
+                                            .forEach(docLinksToEnqueue::add);
+                                    // Rendered navigation links replace Jsoup nav links (richer source).
+                                    navLinks = rendered.links().stream()
+                                            .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
+                                            .filter(l -> !l.isEmpty() && !UrlUtils.isIgnoredLink(l))
+                                            .distinct()
+                                            .collect(Collectors.toList());
                                 }
                             }
                         }
@@ -217,8 +224,21 @@ public class Crawler {
                                 matchEngine.findSnippets(content, options.getKeyword(), options.getMode(), 3));
                     }
 
+                    // Enqueue document links regardless of depth (documents are search targets,
+                    // not new crawl levels — they don't multiply the frontier exponentially).
+                    for (String docLink : docLinksToEnqueue) {
+                        if (!options.isAllowExternal()) {
+                            if (!isSameDomain(extractHost(docLink))) continue;
+                        }
+                        if (!dedup.isDuplicate(docLink) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
+                            dedup.markQueued(docLink);
+                            queue.addLast(new UrlDepth(docLink, current.depth + 1));
+                        }
+                    }
+
+                    // Enqueue navigation links only within the depth limit.
                     if (current.depth < options.getDepth()) {
-                        for (String link : links) {
+                        for (String link : navLinks) {
                             if (!options.isAllowExternal()) {
                                 String linkHost = extractHost(link);
                                 if (!isSameDomain(linkHost)) {
