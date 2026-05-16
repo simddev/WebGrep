@@ -37,11 +37,14 @@ import java.util.stream.Collectors;
  */
 public class PlaywrightRenderer implements AutoCloseable {
 
-    // Matches any relative or absolute URL ending in a document extension inside JSON strings.
-    // .zip excluded: isIgnoredLink() filters zip from non-SPA crawls; keeping it here
-    // would inconsistently queue zip files only on SPA pages.
+    // Matches relative or absolute URLs ending in a document extension inside JSON strings.
     private static final Pattern JSON_DOC_URL = Pattern.compile(
             "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|csv)(?:\\?[^\"]*)?)\"",
+            Pattern.CASE_INSENSITIVE);
+    // Matches REST download endpoints where the terminal path segment is literally "download".
+    // Catches common API patterns like /api/files/123/download or /soubor/456/download.
+    private static final Pattern JSON_DOWNLOAD_URL = Pattern.compile(
+            "\"((?:https?://[^\"\\s\"]{4,}|/[^\"\\s\"]{4,})/download)\"",
             Pattern.CASE_INSENSITIVE);
 
     private Playwright playwright;
@@ -177,12 +180,17 @@ public class PlaywrightRenderer implements AutoCloseable {
             @SuppressWarnings("unchecked")
             Map<String, Object> snapshot = (Map<String, Object>) persistentPage.evaluate(
                     "(base) => {"
-                    + "  const ls = [];"
+                    + "  const ls = [], ds = [];"
                     + "  for (const a of document.querySelectorAll('a[href]')) {"
                     + "    const h = a.getAttribute('href');"
                     + "    if (!h || h.startsWith('javascript:') || h.startsWith('mailto:')"
                     + "        || h.startsWith('#')) continue;"
-                    + "    try { ls.push(new URL(h, base).toString()); } catch(_) {}"
+                    + "    try {"
+                    + "      const u = new URL(h, base).toString();"
+                    + "      ls.push(u);"
+                    // Links marked with the HTML5 download attribute are file downloads, not navigation.
+                    + "      if (a.hasAttribute('download')) ds.push(u);"
+                    + "    } catch(_) {}"
                     + "  }"
                     + "  const wgRoot = document.querySelector("
                     + "    'main, [role=main], [role=content], app-root, #app, #root, #content'"
@@ -190,7 +198,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                     + "  const wgClone = wgRoot ? wgRoot.cloneNode(true) : null;"
                     + "  if (wgClone) wgClone.querySelectorAll('script,style,noscript').forEach(n=>n.remove());"
                     + "  return { text: wgClone ? (wgClone.textContent || '') : '',"
-                    + "           links: [...new Set(ls)] };"
+                    + "           links: [...new Set(ls)], downloadLinks: [...new Set(ds)] };"
                     + "}", url);
 
             String text = snapshot != null ? (String) snapshot.get("text") : "";
@@ -198,8 +206,14 @@ public class PlaywrightRenderer implements AutoCloseable {
             List<String> domLinks = snapshot != null
                     ? (List<String>) snapshot.get("links")
                     : new ArrayList<>();
+            @SuppressWarnings("unchecked")
+            List<String> domDownloadLinks = snapshot != null && snapshot.get("downloadLinks") != null
+                    ? (List<String>) snapshot.get("downloadLinks")
+                    : new ArrayList<>();
 
             List<String> captured = new ArrayList<>(interceptedLinks);
+            // Add explicitly-marked download links so they bypass the depth limit in the crawler
+            captured.addAll(domDownloadLinks);
 
             // Round-trip cookies for the crawled host back to the crawler's jar so they
             // survive context switches and are available to the Jsoup fetcher.
@@ -266,16 +280,17 @@ public class PlaywrightRenderer implements AutoCloseable {
             }
             String body = response.text();
 
-            Matcher m = JSON_DOC_URL.matcher(body);
-            while (m.find()) {
-                String found = m.group(1);
-                if (found.startsWith("//")) {
-                    // Protocol-relative URL — inherit scheme from the page base
-                    out.add(urlBase.startsWith("https") ? "https:" + found : "http:" + found);
-                } else if (found.startsWith("/")) {
-                    out.add(urlBase + found);
-                } else {
-                    out.add(found);
+            for (Pattern pat : new Pattern[]{JSON_DOC_URL, JSON_DOWNLOAD_URL}) {
+                Matcher m = pat.matcher(body);
+                while (m.find()) {
+                    String found = m.group(1);
+                    if (found.startsWith("//")) {
+                        out.add(urlBase.startsWith("https") ? "https:" + found : "http:" + found);
+                    } else if (found.startsWith("/")) {
+                        out.add(urlBase + found);
+                    } else {
+                        out.add(found);
+                    }
                 }
             }
         } catch (Exception ignored) {}
