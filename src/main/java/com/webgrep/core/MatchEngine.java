@@ -54,11 +54,11 @@ public class MatchEngine {
         } else {
             // Default: case-insensitive with Unicode and diacritic support.
             // Regex handles exact case-insensitive matches; the simplified pass catches
-            // accented variants (e.g. "cafe" matches "Caf\u00E9"). Both are always counted and
-            // the higher result is returned, because a text like "cafe Caf\u00E9" would yield
-            // only 1 from regex (missing "Caf\u00E9") but 2 from the simplified pass.
+            // accented variants (e.g. "cafe" matches "Café"). Both are always counted and
+            // the higher result is returned, because a text like "cafe Café" would yield
+            // only 1 from regex (missing "Café") but 2 from the simplified pass.
             int count = 0;
-            String processedText = text.replace('\u00A0', ' ');
+            String processedText = text.replace(' ', ' ');
             Matcher matcher = getPattern(keyword, mode).matcher(processedText);
             while (matcher.find()) {
                 count++;
@@ -92,17 +92,58 @@ public class MatchEngine {
         List<String> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
 
+        // Regex pass (handles default case-insensitive and exact)
         Pattern p = mode.equals("exact") ? getPattern(keyword, "exact") : getPattern(keyword, "default");
         Matcher m = p.matcher(flat);
         while (m.find() && results.size() < maxSnippets) {
-            int lo = Math.max(0, m.start() - 60);
-            int hi = Math.min(flat.length(), m.end() + 60);
-            while (lo > 0 && flat.charAt(lo - 1) != ' ') lo--;
-            while (hi < flat.length() && flat.charAt(hi) != ' ') hi++;
-            String snippet = (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
+            String snippet = buildSnippet(flat, m.start(), m.end());
             if (seen.add(snippet)) results.add(snippet);
         }
+
+        // Simplified pass: catches diacritic variants the regex misses (e.g. "Tomas" matching "Tomáš").
+        // Builds a per-character position map from simplified text back to flat so snippet boundaries
+        // are accurate in the original string.
+        if (results.isEmpty() && !mode.equals("exact")) {
+            String simpleKeyword = superSimplify(keyword);
+            if (simpleKeyword.length() >= 2) {
+                StringBuilder simpleBuf = new StringBuilder(flat.length());
+                int[] origPos = new int[flat.length() * 2 + 1]; // *2 for rare ligature decomposition
+                int sLen = 0;
+                for (int ci = 0; ci < flat.length(); ci++) {
+                    String nfd = Normalizer.normalize(String.valueOf(flat.charAt(ci)), Normalizer.Form.NFD);
+                    for (char nc : nfd.toCharArray()) {
+                        int type = Character.getType(nc);
+                        if (type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
+                                || type == Character.ENCLOSING_MARK) continue;
+                        char lc = Character.toLowerCase(nc);
+                        if ((lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9')) {
+                            if (sLen < origPos.length) { origPos[sLen++] = ci; simpleBuf.append(lc); }
+                        }
+                    }
+                }
+                String simpleFlat = simpleBuf.toString();
+                int idx = 0;
+                while (results.size() < maxSnippets) {
+                    idx = simpleFlat.indexOf(simpleKeyword, idx);
+                    if (idx < 0) break;
+                    int flatStart = origPos[idx];
+                    int flatEnd = origPos[Math.min(idx + simpleKeyword.length() - 1, sLen - 1)] + 1;
+                    String snippet = buildSnippet(flat, flatStart, flatEnd);
+                    if (seen.add(snippet)) results.add(snippet);
+                    idx++;
+                }
+            }
+        }
+
         return results;
+    }
+
+    private String buildSnippet(String flat, int start, int end) {
+        int lo = Math.max(0, start - 60);
+        int hi = Math.min(flat.length(), end + 60);
+        while (lo > 0 && flat.charAt(lo - 1) != ' ') lo--;
+        while (hi < flat.length() && flat.charAt(hi) != ' ') hi++;
+        return (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
     }
 
     private int countFuzzyMatches(String text, String keyword) {
