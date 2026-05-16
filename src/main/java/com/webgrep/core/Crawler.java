@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -218,6 +219,7 @@ public class Crawler {
 
                     if (current.depth < options.getDepth()) {
                         for (String link : links) {
+                            if (options.isFollowDocs() && !hasDocumentExtension(link)) continue;
                             if (!options.isAllowExternal()) {
                                 String linkHost = extractHost(link);
                                 if (!isSameDomain(linkHost)) {
@@ -378,6 +380,20 @@ public class Crawler {
         String host = extractHost(url);
         if (host.isEmpty()) return;
         cookieJar.computeIfAbsent(host, k -> new HashMap<>()).putAll(cookies);
+    }
+
+    private static final Set<String> DOC_EXTENSIONS = Set.of(
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "csv"
+    );
+
+    private static boolean hasDocumentExtension(String url) {
+        try {
+            String path = new java.net.URL(url).getPath().toLowerCase();
+            int dot = path.lastIndexOf('.');
+            return dot >= 0 && DOC_EXTENSIONS.contains(path.substring(dot + 1));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void printProgress(String currentUrl, int visited, int matches) {

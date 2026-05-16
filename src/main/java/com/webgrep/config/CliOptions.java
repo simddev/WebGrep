@@ -22,7 +22,7 @@ public class CliOptions {
     private static final Set<String> KNOWN_FLAGS = Set.of(
         "url", "file", "folder", "keyword", "depth", "mode", "max-pages", "max-bytes",
         "timeout-ms", "delay-ms", "max-hits", "allow-external", "insecure", "all-urls",
-        "dfs", "output", "help", "install-browser", "browser"
+        "dfs", "output", "help", "install-browser", "browser", "follow-docs"
     );
 
     private String url;
@@ -44,6 +44,7 @@ public class CliOptions {
     private boolean help = false;
     private boolean installBrowser = false;
     private String browser = "auto"; // "auto", "firefox", or "chromium"
+    private boolean followDocs = false;
 
     public static CliOptions parse(String[] args) {
         CliOptions options = new CliOptions();
@@ -117,6 +118,7 @@ public class CliOptions {
         options.insecure = params.containsKey("insecure");
         options.allUrls = params.containsKey("all-urls");
         options.dfs = params.containsKey("dfs");
+        options.followDocs = params.containsKey("follow-docs");
         options.output = params.getOrDefault("output", "text").toLowerCase();
 
         return options;
@@ -126,7 +128,8 @@ public class CliOptions {
         if (key == null) return false;
         // Boolean flags take no value; all others (url, keyword, depth, mode, browser, …) do.
         return !key.equals("allow-external") && !key.equals("insecure") && !key.equals("all-urls")
-            && !key.equals("dfs") && !key.equals("help") && !key.equals("install-browser");
+            && !key.equals("dfs") && !key.equals("help") && !key.equals("install-browser")
+            && !key.equals("follow-docs");
     }
 
     private static String mapShortFlag(char c) {
@@ -205,6 +208,7 @@ public class CliOptions {
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
         System.out.println("      --browser <type>     Browser for SPA rendering: auto (default), firefox, or chromium");
         System.out.println("      --install-browser    Install a browser for SPA rendering and exit (uses --browser preference)");
+        System.out.println("      --follow-docs        Only follow links to documents (PDF, DOCX, XLSX, etc.); skip HTML pages");
         System.out.println("  -h, --help               Show this help message");
     }
 
@@ -228,4 +232,5 @@ public class CliOptions {
     public boolean isHelp() { return help; }
     public boolean isInstallBrowser() { return installBrowser; }
     public String getBrowser() { return browser; }
+    public boolean isFollowDocs() { return followDocs; }
 }
