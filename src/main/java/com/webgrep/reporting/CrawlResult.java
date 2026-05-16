@@ -1,6 +1,8 @@
 package com.webgrep.reporting;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -23,6 +25,7 @@ public class CrawlResult {
     }
 
     public final Map<String, Integer> results = new LinkedHashMap<>();
+    public final Map<String, List<String>> snippets = new LinkedHashMap<>();
     public final Map<String, String> blockedUrls = new LinkedHashMap<>();
     public final Map<ErrorType, Integer> errorCounts = new LinkedHashMap<>();
     public final Map<String, Integer> networkErrorReasons = new LinkedHashMap<>();
@@ -46,6 +49,12 @@ public class CrawlResult {
     public void addMatch(String url, int count) {
         results.merge(url, count, Integer::sum);
         totalMatches += count;
+    }
+
+    public void addSnippets(String url, List<String> snippetList) {
+        if (!snippetList.isEmpty()) {
+            snippets.computeIfAbsent(url, k -> new ArrayList<>()).addAll(snippetList);
+        }
     }
 
     public void addBlocked(String url, String reason) {

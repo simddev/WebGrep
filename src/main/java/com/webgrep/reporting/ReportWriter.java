@@ -54,7 +54,15 @@ public class ReportWriter {
             results.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
                         .thenComparing(Map.Entry.comparingByKey()))
-                .forEach(entry -> System.out.println("  " + entry.getKey() + " (" + entry.getValue() + ")"));
+                .forEach(entry -> {
+                    System.out.println("  " + entry.getKey() + " (" + entry.getValue() + ")");
+                    List<String> snips = crawlResult.snippets.get(entry.getKey());
+                    if (snips != null && !snips.isEmpty()) {
+                        snips.forEach(s -> System.out.println("    \"" + s + "\""));
+                        int remaining = entry.getValue() - snips.size();
+                        if (remaining > 0) System.out.println("    (+ " + remaining + " more)");
+                    }
+                });
         }
 
         if (!crawlResult.blockedUrls.isEmpty()) {
@@ -128,7 +136,17 @@ public class ReportWriter {
 
         for (int i = 0; i < sortedResults.size(); i++) {
             Map.Entry<String, Integer> entry = sortedResults.get(i);
-            json.append("    { \"url\": \"").append(escapeJson(entry.getKey())).append("\", \"count\": ").append(entry.getValue()).append(" }");
+            json.append("    { \"url\": \"").append(escapeJson(entry.getKey())).append("\", \"count\": ").append(entry.getValue());
+            List<String> snips = crawlResult.snippets.get(entry.getKey());
+            if (snips != null && !snips.isEmpty()) {
+                json.append(", \"snippets\": [");
+                for (int j = 0; j < snips.size(); j++) {
+                    json.append("\"").append(escapeJson(snips.get(j))).append("\"");
+                    if (j < snips.size() - 1) json.append(", ");
+                }
+                json.append("]");
+            }
+            json.append(" }");
             if (i < sortedResults.size() - 1) json.append(",");
             json.append("\n");
         }
