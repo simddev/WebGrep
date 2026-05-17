@@ -28,8 +28,25 @@ import java.util.regex.Pattern;
  */
 public class MatchEngine {
 
+    /**
+     * Cache of compiled regex patterns, keyed by {@code keyword + "\0" + mode}.
+     * Uses {@link ConcurrentHashMap} so the cache is safe to share across threads if needed.
+     * Compiling a pattern is expensive; caching avoids recompilation on every page of a crawl.
+     */
     private final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
 
+    /**
+     * Returns (or creates and caches) the compiled regex pattern for the given keyword and mode.
+     *
+     * <p>For {@code exact} mode: a case-sensitive, literal-quoted pattern.
+     * For all other modes: a case-insensitive, Unicode-aware, literal-quoted pattern.
+     * {@link Pattern#quote} escapes any regex metacharacters in the keyword so it is always
+     * treated as a plain string.
+     *
+     * @param keyword the search keyword; must not be {@code null}.
+     * @param mode    {@code "exact"} for case-sensitive, anything else for case-insensitive.
+     * @return the compiled {@link Pattern}.
+     */
     private Pattern getPattern(String keyword, String mode) {
         return patternCache.computeIfAbsent(keyword + "\0" + mode, k ->
                 mode.equals("exact")
@@ -37,6 +54,24 @@ public class MatchEngine {
                         : Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));
     }
 
+    /**
+     * Counts the number of times {@code keyword} appears in {@code text} using the specified mode.
+     *
+     * <p><b>Default mode:</b> runs both a regex (case-insensitive, Unicode-aware) pass and a
+     * simplified (diacritic-stripped, punctuation-removed) substring pass, returning the higher
+     * of the two counts. The higher result is taken because a text like {@code "cafe Café"} with
+     * keyword {@code "cafe"} yields only 1 from regex (which misses the accented variant) but 2
+     * from the simplified pass.
+     *
+     * <p><b>Exact mode:</b> case-sensitive regex only.
+     *
+     * <p><b>Fuzzy mode:</b> delegates to {@link #countFuzzyMatches}.
+     *
+     * @param text    the string to search; returns 0 if {@code null} or empty.
+     * @param keyword the keyword to search for; returns 0 if {@code null} or empty.
+     * @param mode    one of {@code "default"}, {@code "exact"}, or {@code "fuzzy"}.
+     * @return the number of keyword occurrences found; never negative.
+     */
     public int countMatches(String text, String keyword, String mode) {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) {
             return 0;
@@ -58,7 +93,7 @@ public class MatchEngine {
             // the higher result is returned, because a text like "cafe Café" would yield
             // only 1 from regex (missing "Café") but 2 from the simplified pass.
             int count = 0;
-            String processedText = text.replace(' ', ' ');
+            String processedText = text.replace(' ', ' ');
             Matcher matcher = getPattern(keyword, mode).matcher(processedText);
             while (matcher.find()) {
                 count++;
@@ -83,11 +118,34 @@ public class MatchEngine {
         }
     }
 
+    /**
+     * Finds up to {@code maxSnippets} context excerpts from {@code text} that contain the keyword.
+     *
+     * <p>Each snippet is built by taking 60 characters before and after the match position,
+     * then extending both boundaries to the nearest word edge so snippets never cut mid-word.
+     * Ellipsis ({@code ...}) is prepended/appended when the snippet does not reach the
+     * start/end of the text.
+     *
+     * <p><b>Regex pass:</b> uses the same pattern as {@link #countMatches} for {@code default}
+     * and {@code exact} modes.
+     *
+     * <p><b>Simplified pass:</b> runs only when the regex pass found nothing and mode is not
+     * {@code exact}. Builds a character-position map from the simplified string back to the
+     * original string so the snippet contains the original accented characters (not the stripped
+     * version). For example, searching {@code "Tomas"} will find and highlight {@code "Tomáš"}
+     * in its original form in the returned snippet.
+     *
+     * @param text        the string to search.
+     * @param keyword     the keyword to search for.
+     * @param mode        one of {@code "default"}, {@code "exact"}, or {@code "fuzzy"}.
+     * @param maxSnippets maximum number of distinct snippets to return.
+     * @return a list of up to {@code maxSnippets} context strings; empty if no matches found.
+     */
     public List<String> findSnippets(String text, String keyword, String mode, int maxSnippets) {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) return List.of();
 
         // Flatten whitespace so snippets read cleanly as a single line
-        String flat = text.replace(' ', ' ').replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
+        String flat = text.replace(' ', ' ').replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
 
         List<String> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -138,6 +196,19 @@ public class MatchEngine {
         return results;
     }
 
+    /**
+     * Extracts a context excerpt centred on the character range [{@code start}, {@code end})
+     * within {@code flat}.
+     *
+     * <p>Takes up to 60 characters before and after the match, then expands both boundaries
+     * outward to the nearest space so the snippet does not cut a word in half. Adds
+     * {@code "..."} at the beginning or end when the boundary does not reach the edge of the text.
+     *
+     * @param flat  the whitespace-flattened source string.
+     * @param start the index of the first character of the match.
+     * @param end   the index one past the last character of the match.
+     * @return a trimmed snippet string.
+     */
     private String buildSnippet(String flat, int start, int end) {
         int lo = Math.max(0, start - 60);
         int hi = Math.min(flat.length(), end + 60);
@@ -146,6 +217,21 @@ public class MatchEngine {
         return (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
     }
 
+    /**
+     * Counts keyword occurrences in fuzzy mode.
+     *
+     * <p><b>First pass:</b> uses a simplified (diacritic-stripped, punctuation-removed) substring
+     * search. If any matches are found this way, returns the count immediately.
+     *
+     * <p><b>Second pass (Levenshtein):</b> if no substring matches were found, splits the text
+     * into individual words and counts words within edit distance 1 (for keywords ≤ 4 characters)
+     * or edit distance 2 (for longer keywords). An early exit skips words whose length difference
+     * alone exceeds the threshold.
+     *
+     * @param text    the string to search.
+     * @param keyword the keyword to match fuzzily.
+     * @return the number of approximate matches found.
+     */
     private int countFuzzyMatches(String text, String keyword) {
         String superSimpleKeyword = superSimplify(keyword);
         String superSimpleText = superSimplify(text);
@@ -178,6 +264,19 @@ public class MatchEngine {
         return count;
     }
 
+    /**
+     * Strips diacritics, lowercases, and removes all non-alphanumeric characters from {@code input}.
+     *
+     * <p>Uses Unicode NFD normalisation to decompose characters into base letter + combining
+     * mark(s), then discards all combining marks ({@code \p{M}}). The result contains only
+     * ASCII letters and digits.
+     *
+     * <p>Examples: {@code "Café"} → {@code "cafe"}, {@code "C++"} → {@code "c"},
+     * {@code "Tomáš"} → {@code "tomas"}.
+     *
+     * @param input the string to simplify; {@code null} is treated as {@code ""}.
+     * @return the simplified string; never {@code null}.
+     */
     public String superSimplify(String input) {
         if (input == null) return "";
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
@@ -185,6 +284,16 @@ public class MatchEngine {
         return normalized.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
+    /**
+     * Same as {@link #superSimplify} but preserves spaces so the result can be split into words.
+     * Used by fuzzy mode to tokenise the text before Levenshtein matching.
+     *
+     * <p>Non-alphanumeric, non-space characters are replaced with a space rather than removed,
+     * so word boundaries around punctuation are preserved.
+     *
+     * @param input the string to simplify; {@code null} is treated as {@code ""}.
+     * @return the simplified string with spaces preserved; never {@code null}.
+     */
     private String simplifyWithSpaces(String input) {
         if (input == null) return "";
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
@@ -192,6 +301,17 @@ public class MatchEngine {
         return normalized.toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
     }
 
+    /**
+     * Computes the Levenshtein edit distance between two strings using dynamic programming.
+     *
+     * <p>The edit distance is the minimum number of single-character insertions, deletions,
+     * or substitutions required to transform {@code s1} into {@code s2}. Used by fuzzy mode
+     * to find words that are close to the keyword.
+     *
+     * @param s1 the first string.
+     * @param s2 the second string.
+     * @return the edit distance; 0 means the strings are identical.
+     */
     private int levenshteinDistance(String s1, String s2) {
         int[][] dp = new int[s1.length() + 1][s2.length() + 1];
 

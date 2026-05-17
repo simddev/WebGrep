@@ -19,11 +19,40 @@ import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
- * WebGrep - A professional CLI web crawler and keyword searcher.
+ * WebGrep — Keyword search across websites, local files, and folders.
+ *
+ * <p>Entry point for the application. Parses command-line arguments via {@link CliOptions},
+ * then routes execution to one of three modes:
+ * <ul>
+ *   <li><b>Web crawl</b> — {@link Crawler} fetches pages and documents starting from a seed URL.</li>
+ *   <li><b>Local file</b> — {@link #scanLocalFile} reads and searches a single file on disk.</li>
+ *   <li><b>Local folder</b> — {@link #scanFolder} recursively searches all files in a directory.</li>
+ * </ul>
+ *
+ * <p>All three modes share {@link ContentExtractor} (for text extraction) and {@link MatchEngine}
+ * (for keyword matching), and pass results to {@link ReportWriter} for text or JSON output.
+ *
  * @author Simon D.
  */
 public class Main {
 
+    /**
+     * Application entry point.
+     *
+     * <p>Execution order:
+     * <ol>
+     *   <li>{@link #setupLogging()} silences all third-party library logging.</li>
+     *   <li>{@link CliOptions#parse(String[])} parses the raw arguments.</li>
+     *   <li>If {@code --help} or no arguments: print help and exit.</li>
+     *   <li>If {@code --install-browser}: install the browser and exit.</li>
+     *   <li>Otherwise: validate options, build shared components, and run the appropriate mode.</li>
+     * </ol>
+     *
+     * <p>Exit codes: {@code 0} = success; {@code 1} = configuration error;
+     * {@code 2} = fatal runtime error.
+     *
+     * @param args raw command-line arguments.
+     */
     public static void main(String[] args) {
         setupLogging();
 
@@ -91,8 +120,39 @@ public class Main {
         }
     }
 
+    /**
+     * Carries the results of a completed folder scan back to {@link #main}.
+     *
+     * @param results         list of files that contained at least one keyword match.
+     * @param scanned         number of files that were read and searched.
+     * @param skipped         number of files skipped because they exceeded {@code --max-bytes}.
+     * @param failed          number of files that could not be read or parsed.
+     * @param stoppedAtMaxHits the {@code --max-hits} value that triggered an early stop, or 0.
+     */
     private record FolderScan(List<FileScanResult> results, int scanned, int skipped, int failed, int stoppedAtMaxHits) {}
 
+    /**
+     * Recursively scans all regular files in the directory specified by {@code options.getFolder()},
+     * searching each for the keyword and collecting matching lines.
+     *
+     * <p>Files are processed in sorted path order. Each file is:
+     * <ol>
+     *   <li>Skipped (counted as {@code skipped}) if it exceeds {@code --max-bytes}.</li>
+     *   <li>Read in full via {@link Files#readAllBytes}.</li>
+     *   <li>Passed to {@link ContentExtractor#extractTextFromBinary} for Tika parsing.</li>
+     *   <li>Searched with {@link #findLineMatches}.</li>
+     * </ol>
+     *
+     * <p>A progress indicator is printed to stderr during the scan and erased on completion.
+     * The scan stops early if {@code --max-hits} is reached mid-file (the check fires after
+     * each complete file, so the actual total may slightly exceed the limit).
+     *
+     * @param options     validated CLI options.
+     * @param extractor   shared text extractor.
+     * @param matchEngine shared keyword matcher.
+     * @return a {@link FolderScan} record with results and statistics.
+     * @throws Exception if the directory cannot be walked (permissions, I/O error).
+     */
     private static FolderScan scanFolder(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
             throws Exception {
         File dir = new File(options.getFolder());
@@ -137,6 +197,18 @@ public class Main {
         return new FolderScan(results, scanned, skipped, failed, stoppedEarly ? options.getMaxHits() : 0);
     }
 
+    /**
+     * Reads and searches a single local file specified by {@code options.getFile()}.
+     *
+     * <p>If the file exceeds {@code --max-bytes}, a warning is printed to stderr and an empty
+     * match list is returned (the file is not searched).
+     *
+     * @param options     validated CLI options.
+     * @param extractor   shared text extractor.
+     * @param matchEngine shared keyword matcher.
+     * @return list of matching lines; empty if no matches or the file was skipped.
+     * @throws Exception if the file cannot be read.
+     */
     private static List<FileMatch> scanLocalFile(CliOptions options, ContentExtractor extractor, MatchEngine matchEngine)
             throws Exception {
         File f = new File(options.getFile());
@@ -152,6 +224,31 @@ public class Main {
         return findLineMatches(text, options.getKeyword(), options.getMode(), matchEngine);
     }
 
+    /**
+     * Searches the extracted plain text for the keyword, returning one {@link FileMatch} per
+     * matching line.
+     *
+     * <p>Processing steps:
+     * <ol>
+     *   <li>Normalise line endings: {@code \r\n} and bare {@code \r} are both mapped to {@code \n}.</li>
+     *   <li>Detect page boundaries: Apache Tika inserts {@code \f} (form-feed, U+000C) as a page
+     *       separator in multi-page documents such as PDFs. If {@code \f} is present, the text
+     *       is split by page and the {@code page} field is set to the 1-based page number;
+     *       otherwise {@code page = 0} (no page structure).</li>
+     *   <li>For each line on each page, {@link MatchEngine#countMatches} is called. Lines with
+     *       at least one match are recorded as {@link FileMatch} entries.</li>
+     *   <li>Snippets are trimmed and truncated to 120 characters.</li>
+     * </ol>
+     *
+     * <p>Package-private (not private) so that unit tests can call it directly without going
+     * through the full {@code main} stack.
+     *
+     * @param text        the plain text to search; may be {@code null} or empty.
+     * @param keyword     the keyword to search for.
+     * @param mode        matching mode: {@code "default"}, {@code "exact"}, or {@code "fuzzy"}.
+     * @param matchEngine the configured {@link MatchEngine} instance.
+     * @return a list of matching lines; empty if no matches are found.
+     */
     static List<FileMatch> findLineMatches(String text, String keyword, String mode, MatchEngine matchEngine) {
         List<FileMatch> matches = new ArrayList<>();
         if (text == null || text.isEmpty()) return matches;
@@ -175,6 +272,17 @@ public class Main {
         return matches;
     }
 
+    /**
+     * Handles the {@code --install-browser} flag.
+     *
+     * <p>If a compatible system browser (Chromium or Firefox) is already installed and matches
+     * the {@code --browser} preference, reports it and exits without downloading anything.
+     * Otherwise, prompts the user to choose a browser (or respects the {@code --browser} flag)
+     * and calls the Playwright CLI installer.
+     *
+     * @param options validated CLI options; {@code options.getBrowser()} controls the preference.
+     * @throws Exception if the Playwright installer throws.
+     */
     private static void installBrowser(CliOptions options) throws Exception {
         String pref = options.getBrowser(); // "auto", "firefox", or "chromium"
 
@@ -214,6 +322,14 @@ public class Main {
         System.out.println("Done. WebGrep will use it automatically for SPA pages.");
     }
 
+    /**
+     * Suppresses all third-party library logging so that only WebGrep's own output reaches
+     * the user.
+     *
+     * <p>Libraries silenced: Apache Commons Logging (used by Tika), SLF4J Simple (used by
+     * Playwright), and the JUL (Java Util Logging) root logger used by various Tika parsers.
+     * All three must be silenced independently because they use different logging frameworks.
+     */
     private static void setupLogging() {
         // Suppress noisy library logging
         System.setProperty("org.apache.commons.logging.Log", "org.apache.commons.logging.impl.NoOpLog");

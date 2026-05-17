@@ -22,6 +22,17 @@ import java.util.Map;
  */
 public class ReportWriter {
 
+    /**
+     * Prints the human-readable text summary for a completed web crawl.
+     *
+     * <p>The output includes: duration, total matches, page counts broken down into HTML pages
+     * and binary documents, any crawl errors grouped by category, a sorted list of matching
+     * URLs with context snippets, blocked/inaccessible URLs grouped by reason (capped at 10
+     * per reason to prevent flooding the output), and an early-stop notice if
+     * {@code --max-hits} was reached.
+     *
+     * @param crawlResult the accumulated crawl statistics and results.
+     */
     public void printTextOutput(CrawlResult crawlResult) {
         Map<String, Integer> results = crawlResult.results;
         int totalCount = crawlResult.getTotalMatches();
@@ -91,6 +102,17 @@ public class ReportWriter {
         }
     }
 
+    /**
+     * Prints the JSON output for a completed web crawl.
+     *
+     * <p>The JSON structure includes: {@code query} (URL, depth, keyword, mode),
+     * {@code stats} (timing, counts, error breakdown), an optional {@code stopped_early} field,
+     * {@code results} array (sorted by match count descending, with snippets when present),
+     * and {@code blocked} array. All string values are escaped via {@link #escapeJson}.
+     *
+     * @param crawlResult the accumulated crawl statistics and results.
+     * @param options     the parsed CLI options, used to echo the query parameters back.
+     */
     public void printJsonOutput(CrawlResult crawlResult, CliOptions options) {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
@@ -164,6 +186,20 @@ public class ReportWriter {
         System.out.println(json.toString());
     }
 
+    /**
+     * Prints the human-readable text summary for a folder scan.
+     *
+     * <p>Shows total files scanned, skipped, failed, and with matches, followed by per-file
+     * match listings with page (for multi-page documents) and line locations.
+     *
+     * @param options         the parsed CLI options, used to echo the folder path.
+     * @param results         one entry per file that contained at least one match.
+     * @param filesScanned    total number of files that were read and searched.
+     * @param filesSkipped    number of files that exceeded {@code --max-bytes} and were not scanned.
+     * @param filesFailed     number of files that could not be read or parsed (permission error, corruption, etc.).
+     * @param stoppedAtMaxHits the {@code --max-hits} value that triggered an early stop, or {@code 0} if the scan completed.
+     * @param durationMs      wall-clock time for the entire scan in milliseconds.
+     */
     public void printFolderTextOutput(CliOptions options, List<FileScanResult> results,
                                       int filesScanned, int filesSkipped, int filesFailed,
                                       int stoppedAtMaxHits, long durationMs) {
@@ -201,6 +237,21 @@ public class ReportWriter {
         }
     }
 
+    /**
+     * Prints the JSON output for a folder scan.
+     *
+     * <p>The JSON structure includes: {@code query} (folder, keyword, mode), {@code stats}
+     * (timing, file counts), an optional {@code stopped_early} field, and {@code results}
+     * array with per-file match details including page and line numbers.
+     *
+     * @param options         the parsed CLI options, used to echo the query parameters.
+     * @param results         one entry per file that contained at least one match.
+     * @param filesScanned    total files scanned.
+     * @param filesSkipped    files skipped due to size limit.
+     * @param filesFailed     files that could not be parsed.
+     * @param stoppedAtMaxHits early-stop trigger value, or {@code 0}.
+     * @param durationMs      wall-clock time in milliseconds.
+     */
     public void printFolderJsonOutput(CliOptions options, List<FileScanResult> results,
                                       int filesScanned, int filesSkipped, int filesFailed,
                                       int stoppedAtMaxHits, long durationMs) {
@@ -253,6 +304,16 @@ public class ReportWriter {
         System.out.println(json.toString());
     }
 
+    /**
+     * Prints the human-readable text summary for a single-file search.
+     *
+     * <p>Shows file path, total match count, and per-match location (page + line for
+     * multi-page documents, line only for plain text) with a 120-character snippet.
+     *
+     * @param options    the parsed CLI options, used to echo the file path.
+     * @param matches    all matching lines found in the file.
+     * @param durationMs wall-clock time in milliseconds.
+     */
     public void printFileTextOutput(CliOptions options, List<FileMatch> matches, long durationMs) {
         int total = matches.stream().mapToInt(FileMatch::count).sum();
         boolean hasPages = matches.stream().anyMatch(m -> m.page() > 0);
@@ -274,6 +335,17 @@ public class ReportWriter {
         }
     }
 
+    /**
+     * Prints the JSON output for a single-file search.
+     *
+     * <p>The JSON structure includes: {@code query} (file, keyword, mode), {@code stats}
+     * (timing, total matches), and a {@code matches} array with per-line details.
+     * The {@code page} field is omitted for files with no page structure.
+     *
+     * @param options    the parsed CLI options, used to echo the query parameters.
+     * @param matches    all matching lines found in the file.
+     * @param durationMs wall-clock time in milliseconds.
+     */
     public void printFileJsonOutput(CliOptions options, List<FileMatch> matches, long durationMs) {
         int total = matches.stream().mapToInt(FileMatch::count).sum();
         boolean hasPages = matches.stream().anyMatch(m -> m.page() > 0);
@@ -305,6 +377,12 @@ public class ReportWriter {
         System.out.println(json.toString());
     }
 
+    /**
+     * Returns a human-readable label for the given error category, used in text output.
+     *
+     * @param type the error category.
+     * @return a short descriptive label, e.g. {@code "Network errors"} or {@code "Blocked"}.
+     */
     private String errorLabel(CrawlResult.ErrorType type) {
         return switch (type) {
             case NETWORK_ERROR -> "Network errors";
@@ -315,6 +393,15 @@ public class ReportWriter {
         };
     }
 
+    /**
+     * Formats a duration in milliseconds as a human-readable string.
+     *
+     * <p>Durations under 60 seconds are displayed as {@code "4.23s"}.
+     * Longer durations are displayed as {@code "1m 32.00s"}.
+     *
+     * @param ms the duration in milliseconds.
+     * @return a formatted duration string.
+     */
     private String formatDuration(long ms) {
         if (ms < 60_000) {
             return String.format("%.2fs", ms / 1000.0);
@@ -324,6 +411,16 @@ public class ReportWriter {
         return String.format("%dm %.2fs", minutes, seconds);
     }
 
+    /**
+     * Escapes a string for safe inclusion as a JSON string value.
+     *
+     * <p>Handles the following characters: {@code \} → {@code \\}, {@code "} → {@code \"},
+     * newline → {@code \n}, carriage return → {@code \r}, tab → {@code \t}, and any other
+     * control character below U+0020 is written as a {@code \\u} Unicode escape sequence.
+     *
+     * @param input the string to escape; {@code null} is treated as {@code ""}.
+     * @return the escaped string, safe to embed between {@code "} characters in JSON.
+     */
     private String escapeJson(String input) {
         if (input == null) return "";
         StringBuilder sb = new StringBuilder();

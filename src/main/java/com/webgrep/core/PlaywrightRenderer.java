@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * during load and extracts document download URLs that are not present as plain
  * {@code <a href>} links in the DOM (e.g. click-handler-driven PDF downloads).
  *
- * <p>Browser resolution order (first available wins):
+ * <h2>Browser resolution order (first available wins)</h2>
  * <ol>
  *   <li>System Chromium/Chrome — drives natively via CDP, most reliable</li>
  *   <li>System Firefox — best-effort; may fail on Dev/Nightly editions</li>
@@ -37,37 +37,135 @@ import java.util.stream.Collectors;
  */
 public class PlaywrightRenderer implements AutoCloseable {
 
-    // Matches relative or absolute URLs ending in a document extension inside JSON strings.
+    /**
+     * Regex that matches relative or absolute URLs ending in a document extension inside JSON
+     * string values. Captures both full HTTP URLs and root-relative paths.
+     * Supported extensions: {@code pdf}, {@code docx}, {@code xlsx}, {@code odt}, {@code doc},
+     * {@code pptx}, {@code csv}.
+     */
     private static final Pattern JSON_DOC_URL = Pattern.compile(
             "\"((?:https?://[^\"]+|/[^\"\\s]+)\\.(?:pdf|docx|xlsx|odt|doc|pptx|csv)(?:\\?[^\"]*)?)\"",
             Pattern.CASE_INSENSITIVE);
-    // Matches REST download endpoints where the terminal path segment is literally "download".
-    // Catches common API patterns like /api/files/123/download or /soubor/456/download.
+
+    /**
+     * Regex that matches REST API download endpoints where the terminal path segment is the
+     * literal word {@code download}. Catches common patterns like {@code /api/files/123/download}
+     * or {@code /soubor/456/download} that appear as strings inside JSON API responses.
+     * Requires the path to be at least 4 characters before the final {@code /download} segment
+     * to avoid false positives.
+     */
     private static final Pattern JSON_DOWNLOAD_URL = Pattern.compile(
             "\"((?:https?://[^\"\\s\"]{4,}|/[^\"\\s\"]{4,})/download)\"",
             Pattern.CASE_INSENSITIVE);
 
+    /** The Playwright instance that manages the browser process. Recreated after disconnects. */
     private Playwright playwright;
-    private Browser browser;
-    private BrowserContext persistentContext;
-    private Page persistentPage;
-    private String persistentBaseUrl;
-    // Shared state for the persistent page's response interceptor; cleared before each navigation.
-    private final List<String> interceptedLinks = Collections.synchronizedList(new ArrayList<>());
-    private volatile String interceptorUrlBase = "";
-    private boolean unavailable = false;
-    private final int timeoutMs;
-    private final boolean insecure;
-    private final String preferredBrowser; // null/"auto", "firefox", or "chromium"
 
+    /** The launched browser (Chromium or Firefox). Connected via CDP (Chromium) or Playwright protocol (Firefox). */
+    private Browser browser;
+
+    /**
+     * The persistent browser context kept alive across multiple {@link #render} calls on the
+     * same domain. Reusing a context avoids re-downloading and re-parsing the JS bundle for
+     * every SPA sub-route.
+     */
+    private BrowserContext persistentContext;
+
+    /**
+     * The single browser tab (Page) kept open within {@link #persistentContext}.
+     * Navigated to each new SPA URL instead of opening a new tab each time.
+     */
+    private Page persistentPage;
+
+    /**
+     * The scheme+host of the domain currently loaded in {@link #persistentContext}
+     * (e.g. {@code "https://example.com"}). Used to detect when a new domain requires
+     * a fresh context.
+     */
+    private String persistentBaseUrl;
+
+    /**
+     * Document download URLs captured by the response interceptor during the current
+     * page navigation. Cleared before each {@link #render} call. Thread-safe because the
+     * Playwright network thread writes to it concurrently with the main thread.
+     */
+    private final List<String> interceptedLinks = Collections.synchronizedList(new ArrayList<>());
+
+    /**
+     * The scheme+host passed to the response interceptor so it can prefix relative paths
+     * found in JSON responses. Updated before each navigation.
+     */
+    private volatile String interceptorUrlBase = "";
+
+    /**
+     * {@code true} after the renderer has failed to initialise (no browser found, browser
+     * crashed, etc.). Once set, all subsequent {@link #render} calls return {@code null}
+     * immediately rather than trying again.
+     */
+    private boolean unavailable = false;
+
+    /** Network request timeout in milliseconds, applied to individual page navigations. */
+    private final int timeoutMs;
+
+    /** Whether to ignore HTTPS certificate errors in the browser context. Matches {@code --insecure}. */
+    private final boolean insecure;
+
+    /**
+     * User's browser preference: {@code "firefox"}, {@code "chromium"}, or {@code null} for auto.
+     * Controls which tiers of {@link #ensureReady()} are skipped.
+     */
+    private final String preferredBrowser;
+
+    /**
+     * The data returned by a single successful page render.
+     *
+     * @param text      visible text content extracted from the rendered DOM (with scripts and
+     *                  style elements removed).
+     * @param links     all {@code <a href>} URLs found in the rendered page, fully resolved
+     *                  via the browser's {@code a.href} DOM property (respects {@code <base href>}).
+     * @param docLinks  document download URLs: REST {@code /download} endpoints and file URLs
+     *                  intercepted from JSON API responses, plus {@code <a download>} DOM links.
+     * @param cookies   cookies set by the browser during this navigation, to be returned to
+     *                  the crawler's cookie jar for subsequent Jsoup requests.
+     */
     public record RenderedPage(String text, List<String> links, List<String> docLinks, Map<String, String> cookies) {}
 
+    /**
+     * Constructs a new {@code PlaywrightRenderer}.
+     *
+     * <p>The renderer is lazy: no browser is launched until the first call to {@link #render}.
+     *
+     * @param timeoutMs       per-navigation timeout in milliseconds.
+     * @param insecure        if {@code true}, HTTPS certificate errors are ignored.
+     * @param preferredBrowser browser preference string from {@code --browser}; {@code "auto"}
+     *                         is normalised to {@code null} to simplify tier-skip logic.
+     */
     public PlaywrightRenderer(int timeoutMs, boolean insecure, String preferredBrowser) {
         this.timeoutMs = timeoutMs;
         this.insecure = insecure;
         this.preferredBrowser = "auto".equalsIgnoreCase(preferredBrowser) ? null : preferredBrowser;
     }
 
+    /**
+     * Heuristically detects whether a Jsoup-parsed HTML document is a single-page application
+     * (Angular, React, Vue, Next.js, or Nuxt.js) that needs JavaScript to render its content.
+     *
+     * <p>Detection signals (any one is sufficient):
+     * <ul>
+     *   <li>{@code <html ng-version="…">} — Angular</li>
+     *   <li>{@code <html data-beasties-container>} — Angular SSR shell</li>
+     *   <li>{@code <html data-n-head>} — Nuxt.js</li>
+     *   <li>{@code [data-reactroot]} element — React</li>
+     *   <li>{@code <script id="__NEXT_DATA__">} — Next.js</li>
+     *   <li>{@code <app-root>} with &lt; 100 chars of text — Angular empty shell</li>
+     *   <li>{@code <div id="root">} or {@code <div id="app">} with &lt; 100 chars — React/Vue shell</li>
+     *   <li>Body text &lt; 100 chars + any JS bundle — generic SPA shell</li>
+     *   <li>Body text &lt; 300 chars + 2 or more JS bundles — stronger generic SPA signal</li>
+     * </ul>
+     *
+     * @param doc the Jsoup-parsed HTML of the plain HTTP response.
+     * @return {@code true} if the page appears to be a JavaScript-rendered SPA.
+     */
     public static boolean isSpa(Document doc) {
         org.jsoup.nodes.Element html = doc.selectFirst("html");
         if (html != null && (html.hasAttr("ng-version")
@@ -88,6 +186,37 @@ public class PlaywrightRenderer implements AutoCloseable {
                 || bodyText.length() < 300 && scripts.size() >= 2;
     }
 
+    /**
+     * Renders the given URL using a headless browser and returns the visible text, all links,
+     * document download URLs, and cookies.
+     *
+     * <p>A persistent browser context is reused across consecutive calls to the same domain
+     * (same scheme+host). For SPA sub-routes this means the JavaScript bundle is already loaded
+     * and the router just swaps components — typically 150–400 ms instead of 10–15 s per page.
+     *
+     * <p>A new context is created when:
+     * <ul>
+     *   <li>{@link #persistentPage} is null or closed (first call, or after a crash).</li>
+     *   <li>The URL's base (scheme+host) differs from {@link #persistentBaseUrl}.</li>
+     * </ul>
+     *
+     * <p>Link collection uses {@code a.href} (the DOM property) rather than
+     * {@code a.getAttribute('href')} so that relative links are resolved against the page's
+     * {@code <base href>} tag. Angular SPAs set {@code <base href="/app/">} and use bare
+     * relative hrefs like {@code api/v1/files/123/download} — resolving those manually against
+     * the route URL gives the wrong path; {@code a.href} gives the correct absolute URL.
+     *
+     * <p>Resource blocking: images, fonts, stylesheets, and media are aborted in the browser
+     * context. Only {@code document}, {@code script}, {@code xhr}, and {@code fetch} requests
+     * are allowed. This significantly speeds up page load and avoids {@code NETWORKIDLE}
+     * delays caused by large media assets.
+     *
+     * @param url     the URL to render.
+     * @param cookies cookies from the crawler's jar to inject into the browser before navigation,
+     *                allowing session-authenticated SPAs to render correctly.
+     * @return a {@link RenderedPage} containing text, links, doc links, and updated cookies;
+     *         or {@code null} if rendering is unavailable or the navigation timed out.
+     */
     public RenderedPage render(String url, Map<String, String> cookies) {
         if (unavailable) return null;
         try {
@@ -256,6 +385,11 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * Closes the persistent browser context and page, releasing associated resources.
+     * Called when switching to a different domain or recovering from a page-level error.
+     * Safe to call even if the context is already null.
+     */
     private void closePersistentContext() {
         if (persistentContext != null) {
             try { persistentContext.close(); } catch (Exception ignored) {}
@@ -266,10 +400,19 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Called for every HTTP response the browser receives. Regex-scans any JSON
-     * API response for URL strings ending in common document extensions
-     * (.pdf, .docx, .xlsx, …) and adds them to the intercepted-links list so the
-     * crawler can fetch and search those documents.
+     * Playwright response event handler. Called on Playwright's internal network thread for
+     * every HTTP response the browser receives during a page load.
+     *
+     * <p>Filters to only JSON responses with status 200, then applies {@link #JSON_DOC_URL} and
+     * {@link #JSON_DOWNLOAD_URL} to the response body. Matching URLs are resolved to absolute
+     * URLs (prepending {@code urlBase} for root-relative paths) and added to {@code out}.
+     *
+     * <p>Responses larger than 5 MB are skipped to avoid blocking the network thread while
+     * reading a very large API payload.
+     *
+     * @param response the Playwright response object.
+     * @param urlBase  the scheme+host of the current page (e.g. {@code "https://example.com"}).
+     * @param out      the thread-safe list to add discovered document URLs to.
      */
     private static void captureDocLinks(Response response, String urlBase, List<String> out) {
         try {
@@ -299,6 +442,31 @@ public class PlaywrightRenderer implements AutoCloseable {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Ensures the browser is launched and ready to render pages.
+     *
+     * <p>If the browser is already connected, returns immediately. Otherwise, attempts to
+     * launch a browser through the following five tiers in order:
+     * <ol>
+     *   <li>System Chromium/Chrome (found via {@link BrowserFinder#findChromium}) — most
+     *       reliable because Chromium speaks CDP natively.</li>
+     *   <li>System Firefox (found via {@link BrowserFinder#findFirefox}) — best-effort;
+     *       Dev/Nightly editions are often incompatible with Playwright's protocol.</li>
+     *   <li>Playwright's cached Firefox ({@code ~/.cache/ms-playwright/firefox-*}).</li>
+     *   <li>Playwright's cached Chromium ({@code ~/.cache/ms-playwright/chromium-*}).</li>
+     *   <li>Download: if {@code --browser} was specified, downloads that browser;
+     *       otherwise prompts the user to choose (requires a TTY). In non-interactive
+     *       sessions, throws {@link IOException} instead of downloading silently.</li>
+     * </ol>
+     *
+     * <p>The {@code --browser} flag skips incompatible tiers:
+     * {@code --browser firefox} skips tier 1 (Chromium);
+     * {@code --browser chromium} skips tiers 2 and 3 (Firefox options).
+     *
+     * @throws IOException          if no browser is available and a download cannot be initiated
+     *                               (non-interactive session without a TTY).
+     * @throws InterruptedException if the thread is interrupted while waiting for a download.
+     */
     private void ensureReady() throws IOException, InterruptedException {
         if (browser != null && browser.isConnected()) return;
 
@@ -374,6 +542,12 @@ public class PlaywrightRenderer implements AutoCloseable {
         downloadAndLaunch(chosen);
     }
 
+    /**
+     * Interactively prompts the user to choose between Firefox and Chromium for download.
+     * Called only when no browser is found and a TTY is available.
+     *
+     * @return {@code "firefox"} (default, if user presses Enter) or {@code "chromium"}.
+     */
     private String promptBrowserChoice() {
         System.err.println();
         System.err.println("  SPA detected but no compatible browser is available.");
@@ -393,6 +567,17 @@ public class PlaywrightRenderer implements AutoCloseable {
         return "firefox";
     }
 
+    /**
+     * Downloads the specified browser via the Playwright CLI and launches it.
+     *
+     * <p>Calls {@code com.microsoft.playwright.CLI.main({"install", browserType})} which is
+     * the official Playwright browser installer. After the download completes, the browser
+     * is launched headlessly and stored in {@link #browser}.
+     *
+     * @param browserType {@code "firefox"} or {@code "chromium"}.
+     * @throws IOException          if the Playwright initialisation fails.
+     * @throws InterruptedException if the thread is interrupted during the download.
+     */
     private void downloadAndLaunch(String browserType) throws IOException, InterruptedException {
         boolean isChromium = "chromium".equalsIgnoreCase(browserType);
         String label = isChromium ? "Chromium (Google)" : "Firefox (Mozilla)";
@@ -409,12 +594,27 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * Releases all Playwright resources ({@link #playwright} and {@link #browser}) without
+     * throwing. Used to clean up after a failed browser launch attempt before falling through
+     * to the next resolution tier.
+     */
     private void cleanupPlaywright() {
         if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
         playwright = null;
         browser = null;
     }
 
+    /**
+     * Creates a new {@link Playwright} instance with {@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1}
+     * in the environment, preventing Playwright from downloading any browser automatically
+     * during initialisation.
+     *
+     * <p>Playwright emits noisy initialisation output to stderr; that stream is temporarily
+     * redirected to null while the instance is created, then restored immediately after.
+     *
+     * @throws IOException if Playwright fails to initialise.
+     */
     private void initPlaywright() throws IOException {
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
@@ -427,14 +627,32 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * Returns {@code true} if a Playwright-cached Firefox build is present in
+     * {@code ~/.cache/ms-playwright/}.
+     *
+     * @return {@code true} if a directory starting with {@code "firefox-"} exists in the cache.
+     */
     private static boolean isFirefoxCached() {
         return isPlaywrightCached("firefox-");
     }
 
+    /**
+     * Returns {@code true} if a Playwright-cached Chromium build is present in
+     * {@code ~/.cache/ms-playwright/}.
+     *
+     * @return {@code true} if a directory starting with {@code "chromium-"} exists in the cache.
+     */
     private static boolean isChromiumCached() {
         return isPlaywrightCached("chromium-");
     }
 
+    /**
+     * Checks whether the Playwright browser cache directory contains an entry with the given prefix.
+     *
+     * @param prefix the directory name prefix to look for (e.g. {@code "firefox-"}).
+     * @return {@code true} if at least one matching directory exists; {@code false} on any error.
+     */
     private static boolean isPlaywrightCached(String prefix) {
         try {
             Path cache = Paths.get(System.getProperty("user.home"), ".cache", "ms-playwright");
@@ -447,6 +665,16 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * Injects the crawler's session cookies into the given browser context before navigation.
+     *
+     * <p>Converts the flat {@code name → value} cookie map into Playwright {@link Cookie}
+     * objects scoped to the domain and root path {@code "/"}.
+     *
+     * @param context the browser context to inject cookies into.
+     * @param cookies the cookie map collected by the Jsoup fetcher for this host.
+     * @param url     the URL being navigated to; the hostname is used as the cookie domain.
+     */
     private void passCookies(BrowserContext context, Map<String, String> cookies, String url) {
         if (cookies.isEmpty()) return;
         try {
@@ -458,6 +686,16 @@ public class PlaywrightRenderer implements AutoCloseable {
         } catch (MalformedURLException ignored) {}
     }
 
+    /**
+     * Extracts the scheme+host (base URL) from a full URL string.
+     *
+     * <p>Used to determine whether a new navigation requires a fresh browser context
+     * (different domain) or can reuse the existing one (same domain).
+     *
+     * @param url the full URL.
+     * @return the scheme+host string, e.g. {@code "https://example.com"};
+     *         or {@code ""} if the URL is malformed.
+     */
     private static String baseUrl(String url) {
         try {
             URL u = new URL(url);
@@ -467,6 +705,11 @@ public class PlaywrightRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * Closes all Playwright resources: the persistent context, the browser, and the Playwright
+     * instance. Called automatically when the crawler is done (via {@code try-with-resources}
+     * or the {@code finally} block in {@link com.webgrep.core.Crawler#crawl()}).
+     */
     @Override
     public void close() {
         closePersistentContext();
