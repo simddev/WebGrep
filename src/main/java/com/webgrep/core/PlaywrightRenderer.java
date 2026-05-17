@@ -179,18 +179,21 @@ public class PlaywrightRenderer implements AutoCloseable {
             // IPC call per anchor (80+ on some pages), adding ~150ms and leaking ElementHandles.
             @SuppressWarnings("unchecked")
             Map<String, Object> snapshot = (Map<String, Object>) persistentPage.evaluate(
+                    // Use a.href (the DOM property) instead of a.getAttribute('href') so that
+                    // relative URLs are resolved via the page's <base href> tag, not the page URL.
+                    // Angular apps set <base href="/app/"> and use hrefs like "api/v1/..." — those
+                    // would resolve incorrectly against the current route if we used getAttribute.
                     "(base) => {"
                     + "  const ls = [], ds = [];"
                     + "  for (const a of document.querySelectorAll('a[href]')) {"
-                    + "    const h = a.getAttribute('href');"
-                    + "    if (!h || h.startsWith('javascript:') || h.startsWith('mailto:')"
-                    + "        || h.startsWith('#')) continue;"
-                    + "    try {"
-                    + "      const u = new URL(h, base).toString();"
-                    + "      ls.push(u);"
+                    + "    const raw = a.getAttribute('href') || '';"
+                    + "    if (!raw || raw.startsWith('javascript:') || raw.startsWith('mailto:')"
+                    + "        || raw === '#' || raw.startsWith('#')) continue;"
+                    + "    const h = a.href;"  // fully resolved by browser against <base href>
+                    + "    if (!h || h.startsWith('javascript:') || h.startsWith('mailto:')) continue;"
+                    + "    ls.push(h);"
                     // Links marked with the HTML5 download attribute are file downloads, not navigation.
-                    + "      if (a.hasAttribute('download')) ds.push(u);"
-                    + "    } catch(_) {}"
+                    + "    if (a.hasAttribute('download')) ds.push(h);"
                     + "  }"
                     + "  const wgRoot = document.querySelector("
                     + "    'main, [role=main], [role=content], app-root, #app, #root, #content'"
