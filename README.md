@@ -13,7 +13,7 @@ WebGrep is a high-performance CLI keyword search tool with three modes: **web cr
 ### Option 1 — Native JAR (requires Java 17+)
 ```bash
 mvn package
-java -jar target/WebGrep-1.1.3.jar -u https://example.com -k "your keyword"
+java -jar target/WebGrep-1.1.4.jar -u https://example.com -k "your keyword"
 ```
 
 ### Option 2 — Docker (no Java required)
@@ -287,7 +287,7 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
     }
   },
   "results": [
-    { "url": "https://example.com/", "count": 13 }
+    { "url": "https://example.com/", "count": 13, "snippets": ["...the domain example.com is used to illustrate...", "...illustrative examples in documents without prior coordination..."] }
   ],
   "blocked": []
 }
@@ -374,11 +374,12 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 WebGrep is designed with a modular architecture for performance and maintainability:
 
 - **CliOptions**: Parses and validates all command-line arguments. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
-- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl. On first SPA encounter, prompts the user and delegates to `PlaywrightRenderer`.
-- **PlaywrightRenderer**: Headless browser renderer for JavaScript-rendered SPAs. Manages browser lifecycle and selection across five tiers (system Chromium → system Firefox → cached Playwright Firefox → cached Playwright Chromium → first-time download). Also intercepts JSON API responses to capture document download URLs that SPAs serve via click handlers rather than plain `<a href>` links.
+- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl. Separates links into *navigation links* (respect depth limit) and *document links* (always enqueued — documents are leaves that cannot expand the crawl frontier). On first SPA encounter, prompts the user and delegates to `PlaywrightRenderer`.
+- **PlaywrightRenderer**: Headless browser renderer for JavaScript-rendered SPAs. Manages browser lifecycle and selection across five tiers (system Chromium → system Firefox → cached Playwright Firefox → cached Playwright Chromium → first-time download). Uses `a.href` (the DOM property) for link resolution so that Angular/React apps with `<base href>` resolve relative URLs correctly. Also intercepts JSON API responses to capture document download URLs that SPAs serve via click handlers rather than plain `<a href>` links.
 - **BrowserFinder**: Locates system-installed browser binaries (Chromium/Chrome and Firefox) across Linux, macOS, and Windows via known install paths, falling back to `which`/`where` for non-standard package manager locations.
 - **ContentExtractor**: Extracts searchable text from HTML pages via Jsoup, and from binary documents via Apache Tika with a 30-second timeout per file to prevent hangs on corrupt or oversized content.
-- **MatchEngine**: Pluggable matching strategies (case-insensitive, exact, fuzzy/Levenshtein) with full Unicode and diacritic support. Compiled regex patterns are cached per keyword/mode pair for performance.
+- **MatchEngine**: Pluggable matching strategies (case-insensitive with diacritic support, exact, fuzzy/Levenshtein). Compiled regex patterns are cached per keyword/mode pair for performance. Returns both match counts and context snippets.
+- **UrlDeduplicator**: Smart URL deduplication. Treats `?id=1&sort=asc` as a variant of `?id=1` (same content, extra parameter) but allows `?id=2` through (different content). Use `--all-urls` to visit every URL regardless.
 - **ReportWriter**: Renders results as human-readable text or structured JSON. Covers all three input modes.
 
 ---
