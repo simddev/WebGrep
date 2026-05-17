@@ -22,6 +22,17 @@ public class BrowserFinder {
 
     // ── Chromium / Chrome ─────────────────────────────────────────────────────
 
+    /**
+     * Searches for an installed Chromium or Google Chrome binary on the current system.
+     *
+     * <p>Checks the hard-coded paths returned by {@link #knownChromiumPaths()} first, then
+     * falls back to running {@code which chromium-browser}, {@code which chromium},
+     * {@code which google-chrome}, and {@code which google-chrome-stable} (or the Windows
+     * {@code where} equivalent).
+     *
+     * @return an {@code Optional} containing the path to the executable if found,
+     *         or {@code Optional.empty()} if no Chromium/Chrome binary could be located.
+     */
     public static Optional<Path> findChromium() {
         for (Path p : knownChromiumPaths()) {
             if (Files.isExecutable(p)) return Optional.of(p);
@@ -30,6 +41,15 @@ public class BrowserFinder {
                             "google-chrome", "google-chrome-stable");
     }
 
+    /**
+     * Returns the list of hard-coded file-system paths where Chromium or Chrome are
+     * typically installed on the detected operating system.
+     *
+     * <p>On Linux, Snap installs ({@code /snap/bin/chromium}) are included. On Windows,
+     * the {@code LOCALAPPDATA} and {@code ProgramFiles} environment variables are consulted.
+     *
+     * @return an ordered list of candidate paths; paths that do not exist on disk are harmless.
+     */
     private static List<Path> knownChromiumPaths() {
         String os = System.getProperty("os.name", "").toLowerCase();
 
@@ -63,6 +83,22 @@ public class BrowserFinder {
 
     // ── Firefox ───────────────────────────────────────────────────────────────
 
+    /**
+     * Searches for an installed Firefox binary on the current system.
+     *
+     * <p>Checks the hard-coded paths returned by {@link #knownFirefoxPaths()} first, then
+     * falls back to running {@code which} (or {@code where} on Windows) for
+     * {@code firefox-developer-edition}, {@code firefox-nightly}, {@code firefox},
+     * {@code firefox-esr}, and {@code iceweasel}.
+     *
+     * <p><b>Note:</b> Playwright requires its own patched Firefox build. A system Firefox
+     * Developer Edition or Nightly may be incompatible with Playwright's communication
+     * protocol. {@link com.webgrep.core.PlaywrightRenderer} falls through to the next tier
+     * silently if launching with a system Firefox fails.
+     *
+     * @return an {@code Optional} containing the path to the executable if found,
+     *         or {@code Optional.empty()} if no Firefox binary could be located.
+     */
     public static Optional<Path> findFirefox() {
         for (Path p : knownFirefoxPaths()) {
             if (Files.isExecutable(p)) return Optional.of(p);
@@ -71,6 +107,16 @@ public class BrowserFinder {
                             "firefox", "firefox-esr", "iceweasel");
     }
 
+    /**
+     * Returns the list of hard-coded file-system paths where Firefox is typically installed
+     * on the detected operating system.
+     *
+     * <p>On Linux, both system-package paths ({@code /usr/bin/}) and manual installs
+     * ({@code /opt/firefox*}) are included. On Windows, both {@code ProgramFiles} and
+     * {@code ProgramFiles(x86)} are checked.
+     *
+     * @return an ordered list of candidate paths; paths that do not exist on disk are harmless.
+     */
     private static List<Path> knownFirefoxPaths() {
         String os = System.getProperty("os.name", "").toLowerCase();
 
@@ -109,6 +155,18 @@ public class BrowserFinder {
 
     // ── shared ────────────────────────────────────────────────────────────────
 
+    /**
+     * Attempts to locate a browser binary by running {@code which} (Linux/macOS) or
+     * {@code where} (Windows) for each of the supplied command names, in order.
+     *
+     * <p>The first line of output from a successful {@code which}/{@code where} invocation is
+     * parsed as a file path. The path is returned only if the file is executable on disk —
+     * this guards against stale {@code PATH} entries that point to scripts or aliases.
+     *
+     * @param names one or more command names to search for, tried in order.
+     * @return an {@code Optional} containing the path of the first located executable,
+     *         or {@code Optional.empty()} if none were found.
+     */
     private static Optional<Path> findViaShell(String... names) {
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
         String cmd = isWindows ? "where" : "which";

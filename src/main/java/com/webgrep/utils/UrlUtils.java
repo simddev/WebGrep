@@ -18,8 +18,30 @@ import java.util.regex.Pattern;
  */
 public class UrlUtils {
 
+    /** Pre-compiled pattern for collapsing two or more consecutive slashes into one. */
     private static final Pattern DOUBLE_SLASH = Pattern.compile("/{2,}");
 
+    /**
+     * Resolves {@code urlString} to a canonical absolute {@code http://} or {@code https://} URL.
+     *
+     * <p>Resolution steps (in order):
+     * <ol>
+     *   <li>Protocol-relative URLs ({@code //host/path}) are prefixed with {@code https:} or
+     *       {@code http:} based on the scheme of {@code baseUrlString}.</li>
+     *   <li>Non-{@code http(s)} schemes ({@code javascript:}, {@code ftp:}, {@code data:}, etc.)
+     *       are rejected and return {@code ""}.</li>
+     *   <li>Relative URLs are resolved against {@code baseUrlString} using {@link URL#URL(URL, String)}.</li>
+     *   <li>The resulting URL is normalised: scheme and host are lower-cased, default ports are
+     *       stripped, and runs of {@code //} in the path are collapsed to {@code /}.</li>
+     *   <li>Fragments ({@code #section}) are automatically dropped because {@link URL#getPath()}
+     *       and {@link URL#getQuery()} do not include them.</li>
+     * </ol>
+     *
+     * @param urlString     the raw URL to normalise; may be absolute, relative, or protocol-relative.
+     * @param baseUrlString the page URL to resolve relative links against; may be {@code null}.
+     * @return the canonical absolute URL, or {@code ""} if the URL is invalid or uses a
+     *         non-{@code http(s)} scheme.
+     */
     public static String normalizeUrl(String urlString, String baseUrlString) {
         if (urlString == null || urlString.isEmpty()) {
             return "";
@@ -84,6 +106,22 @@ public class UrlUtils {
         }
     }
 
+    /**
+     * Returns {@code true} if {@code url} points to a known document format that should be
+     * downloaded and parsed by Apache Tika.
+     *
+     * <p>The check is performed on the URL path after stripping any fragment ({@code #…}) and
+     * query string ({@code ?…}), so {@code /files/report.pdf?v=2} is correctly identified as a PDF.
+     *
+     * <p>Recognised extensions: {@code .pdf}, {@code .doc}, {@code .docx}, {@code .txt},
+     * {@code .xlsx}, {@code .odt}, {@code .pptx}, {@code .csv}.
+     *
+     * <p>Used by {@link com.webgrep.core.Crawler} to separate links into document links (which
+     * bypass the depth limit) and navigation links (which respect it).
+     *
+     * @param url the normalised absolute URL to test.
+     * @return {@code true} if the URL path ends in a recognised document extension.
+     */
     public static boolean isDocumentLink(String url) {
         String lower = url.toLowerCase();
         int hashIdx = lower.indexOf('#');
@@ -95,6 +133,28 @@ public class UrlUtils {
             || lower.endsWith(".pptx") || lower.endsWith(".csv");
     }
 
+    /**
+     * Returns {@code true} if {@code url} should never be fetched or enqueued.
+     *
+     * <p>The following categories are ignored:
+     * <ul>
+     *   <li><b>Static assets</b> — CSS, JavaScript, images ({@code .png}, {@code .jpg},
+     *       {@code .jpeg}, {@code .gif}, {@code .svg}, {@code .ico}), web fonts ({@code .woff},
+     *       {@code .woff2}, {@code .ttf}, {@code .otf}), audio/video ({@code .mp3}, {@code .mp4},
+     *       {@code .wav}, {@code .avi}, {@code .mov}, {@code .wmv}), and archives ({@code .zip},
+     *       {@code .rar}, {@code .7z}, {@code .tar.gz}).</li>
+     *   <li><b>Social share redirects</b> — Google Ads, DoubleClick, Facebook sharer, Twitter
+     *       intent, LinkedIn share, Pinterest pin.</li>
+     *   <li><b>Taxonomy pages</b> — paths containing {@code /tag/}, {@code /tags/}, or
+     *       {@code /author/}, which typically generate thousands of near-duplicate listing pages.</li>
+     * </ul>
+     *
+     * <p>Document URLs (PDF, DOCX, etc.) are explicitly <em>not</em> ignored — {@link #isDocumentLink}
+     * is checked first and takes priority, ensuring those files are always fetched.
+     *
+     * @param url the normalised absolute URL to test.
+     * @return {@code true} if the URL should be skipped without fetching.
+     */
     public static boolean isIgnoredLink(String url) {
         String lower = url.toLowerCase();
         int hashIdx = lower.indexOf('#');
