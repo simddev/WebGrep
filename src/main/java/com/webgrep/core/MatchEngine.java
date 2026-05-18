@@ -93,8 +93,7 @@ public class MatchEngine {
             // the higher result is returned, because a text like "cafe Café" would yield
             // only 1 from regex (missing "Café") but 2 from the simplified pass.
             int count = 0;
-            String processedText = text.replace(' ', ' ');
-            Matcher matcher = getPattern(keyword, mode).matcher(processedText);
+            Matcher matcher = getPattern(keyword, mode).matcher(text);
             while (matcher.find()) {
                 count++;
             }

@@ -16,7 +16,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -576,36 +575,6 @@ public class Crawler {
         String host = extractHost(url);
         if (host.isEmpty()) return;
         cookieJar.computeIfAbsent(host, k -> new HashMap<>()).putAll(cookies);
-    }
-
-    /**
-     * Known document file extensions used by {@link #hasDocumentExtension}.
-     * Kept separate from {@link com.webgrep.utils.UrlUtils#isDocumentLink} intentionally —
-     * this set is broader (includes {@code xls}, {@code ppt}, {@code rtf}, etc.) and is used
-     * for a different purpose.
-     */
-    private static final Set<String> DOC_EXTENSIONS = Set.of(
-        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "csv"
-    );
-
-    /**
-     * Returns {@code true} if the URL's path ends in one of the known document extensions
-     * listed in {@link #DOC_EXTENSIONS}.
-     *
-     * <p>Note: this method exists alongside {@link com.webgrep.utils.UrlUtils#isDocumentLink}
-     * which covers a slightly smaller set. Consider consolidating if behaviour diverges.
-     *
-     * @param url the URL to test.
-     * @return {@code true} if the URL looks like a direct document download link.
-     */
-    private static boolean hasDocumentExtension(String url) {
-        try {
-            String path = new java.net.URL(url).getPath().toLowerCase();
-            int dot = path.lastIndexOf('.');
-            return dot >= 0 && DOC_EXTENSIONS.contains(path.substring(dot + 1));
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     /**
