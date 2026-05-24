@@ -583,7 +583,18 @@ public class PlaywrightRenderer implements AutoCloseable {
         String label = isChromium ? "Chromium (Google)" : "Firefox (Mozilla)";
         System.err.printf("%n  Downloading Playwright %s for SPA rendering (~%s MB, one-time)...%n",
                 label, isChromium ? "120" : "105");
-        com.microsoft.playwright.CLI.main(new String[]{"install", isChromium ? "chromium" : "firefox"});
+
+        // CLI.main() calls System.exit() on completion — which would terminate the running crawl.
+        // Run the installer in a subprocess so the JVM process survives the download.
+        String javaExe = ProcessHandle.current().info().command().orElse("java");
+        String cp = PlaywrightRenderer.class.getProtectionDomain()
+                .getCodeSource().getLocation().getPath();
+        Process proc = new ProcessBuilder(javaExe, "-cp", cp,
+                "com.microsoft.playwright.CLI", "install",
+                isChromium ? "chromium" : "firefox")
+                .inheritIO()
+                .start();
+        proc.waitFor();
         System.err.println();
 
         initPlaywright();
