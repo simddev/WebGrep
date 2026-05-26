@@ -275,10 +275,17 @@ public class Main {
     /**
      * Handles the {@code --install-browser} flag.
      *
-     * <p>If a compatible system browser (Chromium or Firefox) is already installed and matches
-     * the {@code --browser} preference, reports it and exits without downloading anything.
-     * Otherwise, prompts the user to choose a browser (or respects the {@code --browser} flag)
-     * and calls the Playwright CLI installer.
+     * <p>Checks for a usable browser in the following order, skipping download if one is found:
+     * <ol>
+     *   <li>System Chromium/Chrome — always reliable (speaks CDP natively).</li>
+     *   <li>Playwright's cached Firefox — previously downloaded, always compatible.</li>
+     *   <li>Playwright's cached Chromium — previously downloaded, always compatible.</li>
+     *   <li>System Firefox stable — trusted unless the path indicates Developer Edition or
+     *       Nightly, which are incompatible with Playwright's patched protocol.</li>
+     * </ol>
+     *
+     * <p>If no compatible browser is found, prompts the user to choose (or respects the
+     * {@code --browser} flag) and calls the Playwright CLI installer.
      *
      * @param options validated CLI options; {@code options.getBrowser()} controls the preference.
      * @throws Exception if the Playwright installer throws.
@@ -286,19 +293,39 @@ public class Main {
     private static void installBrowser(CliOptions options) throws Exception {
         String pref = options.getBrowser(); // "auto", "firefox", or "chromium"
 
-        // Check for an already-usable system browser first.
+        // Chromium/Chrome speaks CDP natively — always compatible with Playwright.
         java.util.Optional<java.nio.file.Path> sysChr = com.webgrep.core.BrowserFinder.findChromium();
-        java.util.Optional<java.nio.file.Path> sysFf  = com.webgrep.core.BrowserFinder.findFirefox();
-
         if (sysChr.isPresent() && !pref.equals("firefox")) {
             System.out.println("System Chromium/Chrome already available at: " + sysChr.get());
             System.out.println("WebGrep will use it automatically — no installation needed.");
             return;
         }
-        if (sysFf.isPresent() && !pref.equals("chromium")) {
-            System.out.println("System Firefox already available at: " + sysFf.get());
+
+        // Playwright's own cached builds are always compatible.
+        java.nio.file.Path pwCache = java.nio.file.Paths.get(
+                System.getProperty("user.home"), ".cache", "ms-playwright");
+        if (!pref.equals("chromium") && isCachedBrowser(pwCache, "firefox-")) {
+            System.out.println("Playwright Firefox is already installed in the cache.");
             System.out.println("WebGrep will use it automatically — no installation needed.");
             return;
+        }
+        if (!pref.equals("firefox") && isCachedBrowser(pwCache, "chromium-")) {
+            System.out.println("Playwright Chromium is already installed in the cache.");
+            System.out.println("WebGrep will use it automatically — no installation needed.");
+            return;
+        }
+
+        // System Firefox stable is usable by Playwright. Developer Edition and Nightly are
+        // incompatible with Playwright's patched protocol and must not be reported as ready.
+        java.util.Optional<java.nio.file.Path> sysFf = com.webgrep.core.BrowserFinder.findFirefox();
+        if (sysFf.isPresent() && !pref.equals("chromium")) {
+            String p = sysFf.get().toString().toLowerCase();
+            boolean incompatible = p.contains("developer-edition") || p.contains("nightly");
+            if (!incompatible) {
+                System.out.println("System Firefox already available at: " + sysFf.get());
+                System.out.println("WebGrep will use it automatically — no installation needed.");
+                return;
+            }
         }
 
         // Decide what to download.
@@ -307,7 +334,7 @@ public class Main {
             toInstall = pref;
         } else {
             // Auto: prompt
-            System.out.println("No system browser found. Choose a browser to install:");
+            System.out.println("No compatible browser found. Choose a browser to install:");
             System.out.println("  [1] Firefox  (Mozilla Foundation, ~105 MB)  [default]");
             System.out.println("  [2] Chromium (Google, ~120 MB)");
             System.out.print("Enter choice [1/2] or Enter for Firefox: ");
@@ -319,7 +346,25 @@ public class Main {
         String label = toInstall.equals("chromium") ? "Chromium (Google)" : "Firefox (Mozilla)";
         System.out.println("Installing Playwright " + label + "...");
         com.microsoft.playwright.CLI.main(new String[]{"install", toInstall});
-        System.out.println("Done. WebGrep will use it automatically for SPA pages.");
+    }
+
+    /**
+     * Returns {@code true} if the Playwright browser cache directory contains a subdirectory
+     * whose name starts with {@code prefix} (e.g. {@code "firefox-"} or {@code "chromium-"}).
+     *
+     * @param cache  path to {@code ~/.cache/ms-playwright}.
+     * @param prefix the directory name prefix to search for.
+     * @return {@code true} if a matching cached browser directory exists.
+     */
+    private static boolean isCachedBrowser(java.nio.file.Path cache, String prefix) {
+        try {
+            if (!java.nio.file.Files.isDirectory(cache)) return false;
+            try (var entries = java.nio.file.Files.list(cache)) {
+                return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
+            }
+        } catch (java.io.IOException e) {
+            return false;
+        }
     }
 
     /**

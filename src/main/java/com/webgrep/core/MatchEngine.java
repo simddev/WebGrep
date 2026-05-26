@@ -144,7 +144,7 @@ public class MatchEngine {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) return List.of();
 
         // Flatten whitespace so snippets read cleanly as a single line
-        String flat = text.replace(' ', ' ').replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
+        String flat = text.replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
 
         List<String> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
