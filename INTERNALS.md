@@ -135,7 +135,13 @@ static List<FileMatch> findLineMatches(String text, String keyword, String mode,
 
 ### 3.5 `installBrowser()`
 
-Handles the `--install-browser` flag. Checks for system browsers first (via `BrowserFinder`) and reports them without downloading. If nothing is found, prompts the user to choose Firefox or Chromium and calls `com.microsoft.playwright.CLI.main(new String[]{"install", …})` — the official Playwright CLI installer.
+Handles the `--install-browser` flag. Checks for a usable browser in priority order and reports it without downloading if one is found:
+
+1. **System Chromium/Chrome** — trusted unconditionally (CDP-native).
+2. **Playwright-cached Firefox/Chromium** (`~/.cache/ms-playwright/`) — previously downloaded builds are always compatible.
+3. **System Firefox stable** — trusted unless the path contains `developer-edition` or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
+
+If no compatible browser is found, the user is prompted to choose Firefox or Chromium (or `--browser` preference is used), and `com.microsoft.playwright.CLI.main(new String[]{"install", …})` — the official Playwright CLI installer — downloads and installs it.
 
 ### 3.6 Error handling
 
