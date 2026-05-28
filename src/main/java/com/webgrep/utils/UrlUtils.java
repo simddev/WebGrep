@@ -1,6 +1,5 @@
 package com.webgrep.utils;
 
-import java.text.Normalizer;
 import java.net.URL;
 import java.util.regex.Pattern;
 

@@ -297,7 +297,7 @@ public class CliOptions {
         System.out.println("  -d, --depth <n>          Maximum crawl depth (default: 1)");
         System.out.println("  -m, --mode <mode>        Match mode: default, exact, or fuzzy");
         System.out.println("  -p, --max-pages <n>      Maximum number of pages to crawl (default: 5000)");
-        System.out.println("  -b, --max-bytes <n>      Maximum file size in bytes (default: 10MB)");
+        System.out.println("  -b, --max-bytes <n>      Maximum response or file size in bytes (default: 10MB)");
         System.out.println("  -t, --timeout-ms <n>     Request timeout in milliseconds (default: 20000)");
         System.out.println("  -r, --delay-ms <n>       Delay between requests in milliseconds (default: 100)");
         System.out.println("  -a, --all-urls           Disable smart URL deduplication; visit every URL regardless of query parameters");

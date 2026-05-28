@@ -351,6 +351,9 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 ```
 
 ### JSON Fields Reference
+
+Not all fields are listed — self-explanatory fields such as `url`, `count`, `snippet`, and `query.*` are visible in the sample output above. The table below covers fields whose meaning may not be immediately obvious.
+
 | Field | Meaning |
 |---|---|
 | `stats.duration_ms` | Wall-clock time for the entire run in milliseconds |
