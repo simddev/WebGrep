@@ -548,6 +548,8 @@ For Firefox (checked second):
 - macOS: Firefox Developer Edition, Nightly, stable, ESR
 - Windows: Program Files paths in the same order
 
+Dev Edition and Nightly appear first in the path list because they are often installed alongside stable Firefox (at a distinct path) and should be attempted if available. However, they are *not* preferred over stable Firefox in the compatibility sense — if `PlaywrightRenderer` fails to launch them (Playwright's patched protocol is incompatible), the exception is caught and the tier falls through silently to the Playwright-cached builds.
+
 ---
 
 ## 8. Core: `ContentExtractor.java`
