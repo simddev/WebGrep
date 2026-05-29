@@ -79,7 +79,7 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 
 **General:**
 - `-n, --max-hits <n>`: Stop after N total matches are found (default: 0 = no limit). Applies to both web crawl and folder scan. The check fires after each page or file completes — a single page/file may contribute more matches than the limit before the search stops. Pairs well with `--dfs` for web crawl to surface deeply buried results quickly.
-- `-b, --max-bytes <n>`: Skip files larger than N bytes (default: 10MB). Applies to web downloads and local files.
+- `-b, --max-bytes <n>`: Maximum response or file size in bytes (default: 10MB). Responses or files exceeding this limit are skipped and counted in the summary.
 - `-o, --output <format>`: Output format: `text` (default) or `json`.
 - `-h, --help`: Show help message.
 

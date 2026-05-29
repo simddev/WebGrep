@@ -138,8 +138,9 @@ static List<FileMatch> findLineMatches(String text, String keyword, String mode,
 Handles the `--install-browser` flag. Checks for a usable browser in priority order and reports it without downloading if one is found:
 
 1. **System Chromium/Chrome** — trusted unconditionally (CDP-native).
-2. **Playwright-cached Firefox/Chromium** (`~/.cache/ms-playwright/`) — previously downloaded builds are always compatible.
-3. **System Firefox stable** — trusted unless the path contains `developer-edition` or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
+2. **Playwright-cached Firefox** (`~/.cache/ms-playwright/firefox-*`) — previously downloaded, always compatible.
+3. **Playwright-cached Chromium** (`~/.cache/ms-playwright/chromium-*`) — same as above.
+4. **System Firefox stable** — trusted unless the path contains `developer-edition` or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
 
 If no compatible browser is found, the user is prompted to choose Firefox or Chromium (or `--browser` preference is used), and `com.microsoft.playwright.CLI.main(new String[]{"install", …})` — the official Playwright CLI installer — downloads and installs it.
 
@@ -406,13 +407,15 @@ Called every time `render()` is invoked. Tries five tiers in order:
 | 2. System Firefox | Found via `BrowserFinder.findFirefox()` → best-effort; falls through if Dev/Nightly is incompatible with Playwright |
 | 3. Playwright's cached Firefox | `~/.cache/ms-playwright/firefox-*` exists |
 | 4. Playwright's cached Chromium | `~/.cache/ms-playwright/chromium-*` exists |
-| 5. Download | User is prompted (or `--browser` preference is used) |
+| 5. Download | User is prompted (or `--browser` preference is used); browser is downloaded via subprocess |
 
 `--browser firefox` skips tier 1 (Chromium). `--browser chromium` skips tiers 2 and 3 (Firefox options).
 
 In non-interactive mode (`System.console() == null`), tier 5 throws an `IOException` instead of prompting, which marks the renderer `unavailable` and prints a warning.
 
-`initPlaywright()` sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in the environment to prevent Playwright from downloading any browser during `Playwright.create()` — only an explicit `CLI.main("install", …)` should download anything.
+**Why tier 5 uses a subprocess:** `com.microsoft.playwright.CLI.main()` calls `System.exit(0)` when the download completes. Calling it in-process during an active crawl would kill the JVM and discard all results collected so far. Instead, `downloadAndLaunch()` spawns a child process via `ProcessBuilder` to run the installer. The parent JVM waits for the child to finish, then launches the browser normally.
+
+`initPlaywright()` sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in the environment to prevent Playwright from downloading any browser during `Playwright.create()` — only an explicit subprocess `CLI install …` should download anything.
 
 ### 6.4 Persistent browser context
 
@@ -899,7 +902,7 @@ Document extensions (PDF, DOCX, etc.) are explicitly **not** ignored — `isDocu
 |---|---|
 | `AppIntegrationTest.java` | End-to-end integration: all three modes (web excluded — needs network), text and JSON output, all match modes, `--max-bytes`, `--max-hits`, Windows line endings, multiple matches per line |
 | `ContentExtractorTest.java` | HTML text extraction, Tika binary extraction, link extraction, edge cases |
-| `MainTest.java` | Argument parsing edge cases, `validate()` error messages, mutual exclusion |
+| `MainTest.java` | `UrlUtils` (normalizeUrl, isIgnoredLink), `MatchEngine` (countMatches, superSimplify, findSnippets), `CrawlResult` accumulation, `Main.findLineMatches` (page detection, truncation, multi-match lines), `CliOptions` parsing and validation edge cases |
 | `ReportWriterTest.java` | JSON escaping, duration formatting, blocked URL grouping, stopped-early output |
 | `UrlDeduplicatorTest.java` | Dedup rules: superset detection, `--all-urls` mode, scheme normalisation, no-params base path handling |
 
