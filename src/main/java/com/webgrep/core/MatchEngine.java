@@ -102,9 +102,13 @@ public class MatchEngine {
             String simpleText = superSimplify(text);
             // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
             // don't degrade to a single letter that matches every word in the text.
-            // The simplified pass is always needed: even a pure-ASCII keyword like "cafe"
-            // must match accented variants in the text ("Café"), which regex cannot find.
-            if (simpleKeyword.length() >= 2) {
+            // Also skip the simplified pass when the keyword contains ASCII special characters
+            // (e.g. "more*", "node.js", ".NET") — stripping them would change the intended
+            // search term and produce false positives. The pass is safe when the only
+            // non-alphanumeric characters are Unicode diacritics (e.g. "café" → "cafe").
+            boolean keywordHasAsciiSpecial = keyword.chars()
+                .anyMatch(c -> c < 128 && !Character.isLetterOrDigit(c) && c != ' ');
+            if (simpleKeyword.length() >= 2 && !keywordHasAsciiSpecial) {
                 int simpleCount = 0;
                 int idx = 0;
                 while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
@@ -159,8 +163,11 @@ public class MatchEngine {
 
         // Simplified pass: catches diacritic variants the regex misses (e.g. "Tomas" matching "Tomáš").
         // Builds a per-character position map from simplified text back to flat so snippet boundaries
-        // are accurate in the original string.
-        if (results.isEmpty() && !mode.equals("exact")) {
+        // are accurate in the original string. Skipped when the keyword contains ASCII special
+        // characters (e.g. "more*", "node.js") — same guard as in countMatches.
+        boolean keywordHasAsciiSpecial = keyword.chars()
+            .anyMatch(c -> c < 128 && !Character.isLetterOrDigit(c) && c != ' ');
+        if (results.isEmpty() && !mode.equals("exact") && !keywordHasAsciiSpecial) {
             String simpleKeyword = superSimplify(keyword);
             if (simpleKeyword.length() >= 2) {
                 StringBuilder simpleBuf = new StringBuilder(flat.length());
