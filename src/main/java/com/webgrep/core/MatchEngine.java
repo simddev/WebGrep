@@ -98,24 +98,26 @@ public class MatchEngine {
                 count++;
             }
 
-            String simpleKeyword = superSimplify(keyword);
-            String simpleText = superSimplify(text);
-            // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
-            // don't degrade to a single letter that matches every word in the text.
-            // Also skip the simplified pass when the keyword contains ASCII special characters
+            // Skip the simplified pass when the keyword contains ASCII special characters
             // (e.g. "more*", "node.js", ".NET") — stripping them would change the intended
             // search term and produce false positives. The pass is safe when the only
             // non-alphanumeric characters are Unicode diacritics (e.g. "café" → "cafe").
-            boolean keywordHasAsciiSpecial = keyword.chars()
-                .anyMatch(c -> c < 128 && !Character.isLetterOrDigit(c) && c != ' ');
-            if (simpleKeyword.length() >= 2 && !keywordHasAsciiSpecial) {
-                int simpleCount = 0;
-                int idx = 0;
-                while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
-                    simpleCount++;
-                    idx += simpleKeyword.length();
+            // Guard is evaluated before superSimplify(text) to avoid a wasted NFD pass over
+            // potentially large page text when the simplified path will be skipped anyway.
+            if (!hasAsciiSpecialChars(keyword)) {
+                String simpleKeyword = superSimplify(keyword);
+                // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
+                // don't degrade to a single letter that matches every word in the text.
+                if (simpleKeyword.length() >= 2) {
+                    String simpleText = superSimplify(text);
+                    int simpleCount = 0;
+                    int idx = 0;
+                    while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
+                        simpleCount++;
+                        idx += simpleKeyword.length();
+                    }
+                    count = Math.max(count, simpleCount);
                 }
-                count = Math.max(count, simpleCount);
             }
             return count;
         }
@@ -136,7 +138,10 @@ public class MatchEngine {
      * {@code exact}. Builds a character-position map from the simplified string back to the
      * original string so the snippet contains the original accented characters (not the stripped
      * version). For example, searching {@code "Tomas"} will find and highlight {@code "Tomáš"}
-     * in its original form in the returned snippet.
+     * in its original form in the returned snippet. In default mode the simplified pass is skipped
+     * when the keyword contains ASCII special characters (e.g. {@code "node.js"}) to avoid false
+     * positives; in fuzzy mode it is always allowed because fuzzy matching intentionally strips
+     * punctuation (consistent with {@link #countMatches} fuzzy behaviour).
      *
      * @param text        the string to search.
      * @param keyword     the keyword to search for.
@@ -147,8 +152,10 @@ public class MatchEngine {
     public List<String> findSnippets(String text, String keyword, String mode, int maxSnippets) {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) return List.of();
 
-        // Flatten whitespace so snippets read cleanly as a single line
-        String flat = text.replaceAll("[\r\n\t]+", " ").replaceAll(" {2,}", " ").trim();
+        // Flatten whitespace so snippets read cleanly as a single line.
+        // U+00A0 (non-breaking space) is normalised here too — SPA pages deliver it via
+        // textContent and it would otherwise survive into snippet text invisibly.
+        String flat = text.replaceAll("[\r\n\t ]+", " ").replaceAll(" {2,}", " ").trim();
 
         List<String> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -163,11 +170,17 @@ public class MatchEngine {
 
         // Simplified pass: catches diacritic variants the regex misses (e.g. "Tomas" matching "Tomáš").
         // Builds a per-character position map from simplified text back to flat so snippet boundaries
-        // are accurate in the original string. Skipped when the keyword contains ASCII special
-        // characters (e.g. "more*", "node.js") — same guard as in countMatches.
-        boolean keywordHasAsciiSpecial = keyword.chars()
-            .anyMatch(c -> c < 128 && !Character.isLetterOrDigit(c) && c != ' ');
-        if (results.isEmpty() && !mode.equals("exact") && !keywordHasAsciiSpecial) {
+        // are accurate in the original string.
+        //
+        // Guard logic:
+        //  - Skipped in exact mode (user wants a literal match).
+        //  - In default mode: skipped when the keyword contains ASCII special characters
+        //    (e.g. "more*", "node.js") because stripping them changes the intended search term.
+        //  - In fuzzy mode: always allowed, even for ASCII-special keywords. Fuzzy mode
+        //    intentionally strips specials (mirrors countFuzzyMatches first pass), so
+        //    "node.js" should find "nodejs" both in count and in snippets.
+        boolean keywordHasAsciiSpecial = hasAsciiSpecialChars(keyword);
+        if (results.isEmpty() && !mode.equals("exact") && (!keywordHasAsciiSpecial || mode.equals("fuzzy"))) {
             String simpleKeyword = superSimplify(keyword);
             if (simpleKeyword.length() >= 2) {
                 StringBuilder simpleBuf = new StringBuilder(flat.length());
@@ -194,7 +207,7 @@ public class MatchEngine {
                     int flatEnd = origPos[Math.min(idx + simpleKeyword.length() - 1, sLen - 1)] + 1;
                     String snippet = buildSnippet(flat, flatStart, flatEnd);
                     if (seen.add(snippet)) results.add(snippet);
-                    idx++;
+                    idx += simpleKeyword.length();
                 }
             }
         }
@@ -268,6 +281,18 @@ public class MatchEngine {
             }
         }
         return count;
+    }
+
+    /**
+     * Returns {@code true} if {@code keyword} contains any ASCII character that is not a letter,
+     * digit, or space — for example {@code '*'}, {@code '.'}, {@code '+'}, {@code '#'}.
+     *
+     * <p>Used to gate the simplified (diacritic-stripping) pass in default mode: stripping such
+     * characters from the keyword before matching would change its meaning and produce false
+     * positives (e.g. {@code "more*"} → {@code "more"}).
+     */
+    private static boolean hasAsciiSpecialChars(String keyword) {
+        return keyword.chars().anyMatch(c -> c < 128 && !Character.isLetterOrDigit(c) && c != ' ');
     }
 
     /**

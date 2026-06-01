@@ -140,7 +140,7 @@ Handles the `--install-browser` flag. Checks for a usable browser in priority or
 1. **System Chromium/Chrome** — trusted unconditionally (CDP-native).
 2. **Playwright-cached Firefox** (`~/.cache/ms-playwright/firefox-*`) — previously downloaded, always compatible.
 3. **Playwright-cached Chromium** (`~/.cache/ms-playwright/chromium-*`) — same as above.
-4. **System Firefox stable** — trusted unless the path contains `developer-edition` or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
+4. **System Firefox stable** — trusted unless the path contains `developer-edition` (Linux) or `developer edition` (macOS/Windows) or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
 
 If no compatible browser is found, the user is prompted to choose Firefox or Chromium (or `--browser` preference is used), and `com.microsoft.playwright.CLI.main(new String[]{"install", …})` — the official Playwright CLI installer — downloads and installs it.
 
@@ -644,10 +644,14 @@ Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICO
 
 **Simplified pass (diacritic fallback):**
 ```java
-String simpleKeyword = superSimplify(keyword);
-String simpleText = superSimplify(text);
-int simpleCount = …indexOf loop…;
-count = Math.max(count, simpleCount);
+if (!hasAsciiSpecialChars(keyword)) {
+    String simpleKeyword = superSimplify(keyword);
+    if (simpleKeyword.length() >= 2) {
+        String simpleText = superSimplify(text);
+        int simpleCount = …indexOf loop…;
+        count = Math.max(count, simpleCount);
+    }
+}
 ```
 
 `superSimplify()` strips all diacritics (NFD normalisation, remove combining marks), lowercases everything, and removes all non-alphanumeric characters. So `café` → `cafe`, `Tomáš` → `tomas`.
@@ -656,7 +660,11 @@ This means searching for `Tomas` will also find `Tomáš` in the text, and vice 
 
 The simplified count and the regex count are both computed, and the higher value is returned. Why? A text like `"cafe Café"` with keyword `cafe` would yield 1 from regex (misses `Café`) but 2 from the simplified pass.
 
-The guard `simpleKeyword.length() >= 2` prevents single-character matches — a keyword like `C++` simplifies to `c`, which would match nearly every word in the text.
+Two guards protect against false positives:
+- `simpleKeyword.length() >= 2` prevents single-character matches — a keyword like `C++` simplifies to `c`, which would match nearly every word in the text.
+- `!hasAsciiSpecialChars(keyword)` skips the pass entirely when the keyword contains ASCII punctuation (e.g. `more*`, `node.js`, `.NET`). Stripping those characters before matching would change the intended search term — `more*` would silently search for `more` and produce false positives. The pass is safe only for pure Unicode diacritics (e.g. `café` → `cafe`).
+
+The `superSimplify(text)` call is deliberately placed inside both guards so it is never run on large page text when the result would be discarded anyway.
 
 ### 9.3 Exact mode
 
@@ -678,9 +686,9 @@ An early exit optimises away words whose length difference alone exceeds the thr
 
 Returns up to `maxSnippets` context strings — short excerpts from the text with the keyword in the middle.
 
-1. Flattens whitespace: replaces tabs, newlines, and runs of spaces with single spaces, so the snippet fits neatly on one output line.
+1. Flattens whitespace: replaces tabs, newlines, non-breaking spaces (U+00A0), and runs of spaces with single spaces, so the snippet fits neatly on one output line.
 2. Runs the regex match (same pattern used by `countMatches`). For each match position, calls `buildSnippet()`.
-3. If regex found nothing and mode is not `exact`, runs the simplified pass with a character position map to convert simplified-text positions back to original-text positions, so the snippet contains the original accented characters (not the stripped version).
+3. If regex found nothing and mode is not `exact`, runs the simplified pass with a character position map to convert simplified-text positions back to original-text positions, so the snippet contains the original accented characters (not the stripped version). The same ASCII-special guard from `countMatches` applies in default mode; in fuzzy mode the guard is relaxed so that keywords like `node.js` find the same text that `countMatches` counted.
 
 `buildSnippet(flat, start, end)` takes 60 characters before and after the match, then extends both ends to word boundaries (so snippets don't cut mid-word).
 
