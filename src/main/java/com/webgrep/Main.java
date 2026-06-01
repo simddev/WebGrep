@@ -280,8 +280,9 @@ public class Main {
      *   <li>System Chromium/Chrome — always reliable (speaks CDP natively).</li>
      *   <li>Playwright's cached Firefox — previously downloaded, always compatible.</li>
      *   <li>Playwright's cached Chromium — previously downloaded, always compatible.</li>
-     *   <li>System Firefox stable — trusted unless the path indicates Developer Edition or
-     *       Nightly, which are incompatible with Playwright's patched protocol.</li>
+     *   <li>System Firefox stable — trusted unless the path indicates Developer Edition
+     *       (hyphen-separated on Linux, space-separated on macOS/Windows) or Nightly, which
+     *       are incompatible with Playwright's patched protocol.</li>
      * </ol>
      *
      * <p>If no compatible browser is found, prompts the user to choose (or respects the
@@ -320,7 +321,10 @@ public class Main {
         java.util.Optional<java.nio.file.Path> sysFf = com.webgrep.core.BrowserFinder.findFirefox();
         if (sysFf.isPresent() && !pref.equals("chromium")) {
             String p = sysFf.get().toString().toLowerCase();
-            boolean incompatible = p.contains("developer-edition") || p.contains("nightly");
+            // "developer-edition" matches Linux paths; "developer edition" (with space) matches
+            // macOS ("Firefox Developer Edition.app") and Windows ("Firefox Developer Edition\").
+            boolean incompatible = p.contains("developer-edition") || p.contains("developer edition")
+                    || p.contains("nightly");
             if (!incompatible) {
                 System.out.println("System Firefox already available at: " + sysFf.get());
                 System.out.println("WebGrep will use it automatically — no installation needed.");
@@ -346,6 +350,7 @@ public class Main {
         String label = toInstall.equals("chromium") ? "Chromium (Google)" : "Firefox (Mozilla)";
         System.out.println("Installing Playwright " + label + "...");
         com.microsoft.playwright.CLI.main(new String[]{"install", toInstall});
+        System.out.println("Done. WebGrep will use it automatically for SPA pages.");
     }
 
     /**
