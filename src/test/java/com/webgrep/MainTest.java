@@ -831,6 +831,23 @@ public class MainTest {
     }
 
     @Test
+    public void testFindSnippetsFuzzyWithAsciiSpecialKeyword() {
+        MatchEngine engine = new MatchEngine();
+        // "node.js" in fuzzy mode: countFuzzyMatches strips the dot and finds "nodejs",
+        // so findSnippets must also find it via the simplified pass (fuzzy exemption to ASCII-special guard).
+        List<String> snips = engine.findSnippets(
+                "The nodejs ecosystem is popular. The node.js runtime is used everywhere.", "node.js", "fuzzy", 5);
+        assertTrue("Fuzzy mode must find 'nodejs' even for an ASCII-special keyword", snips.size() > 0);
+    }
+
+    @Test
+    public void testFindLineMatchesWhitespaceOnlyText() {
+        MatchEngine engine = new MatchEngine();
+        assertTrue(Main.findLineMatches("   \n  \t  \n  ", "fox", "default", engine).isEmpty());
+        assertTrue(Main.findLineMatches("\n\n\n", "fox", "default", engine).isEmpty());
+    }
+
+    @Test
     public void testSpaDetectionTriggeredOnEmptyBody() {
         // B-11: a page with very short body text and any JS is still detected as SPA
         String html = "<html><head><script src='app.js'></script></head>"

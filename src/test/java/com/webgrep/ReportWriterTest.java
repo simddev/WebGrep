@@ -97,6 +97,19 @@ public class ReportWriterTest {
     }
 
     @Test
+    public void testJsonOutputEscapesNullAndFormFeed() {
+        CrawlResult result = new CrawlResult();
+        // U+0000 (null) and U+000C (form-feed, Tika's page separator) must be unicode-escaped in JSON
+        result.addMatch("http://example.com/\u0000\u000cpath", 1);
+        new ReportWriter().printJsonOutput(result, sampleOptions());
+        String json = out.toString();
+        assertFalse("Null byte must not appear raw in JSON output", json.contains("\u0000"));
+        assertFalse("Form-feed must not appear raw in JSON output", json.contains("\u000c"));
+        assertTrue(json.contains("\\u0000"));
+        assertTrue(json.contains("\\u000c"));
+    }
+
+    @Test
     public void testJsonOutputEscapesControlCharacters() {
         CrawlResult result = new CrawlResult();
         result.addMatch("http://example.com/\u0001\u0002path", 1);

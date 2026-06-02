@@ -176,7 +176,8 @@ public class CrawlResult {
             case "SocketTimeoutException"               -> "Timeout";
             case "UnknownHostException"                 -> "DNS failure";
             case "ConnectException"                     -> "Connection refused";
-            case "SSLException", "SSLHandshakeException"-> "SSL error";
+            case "SSLException", "SSLHandshakeException",
+                 "SSLPeerUnverifiedException"          -> "SSL error";
             case "UnsupportedMimeTypeException"         -> "Unsupported content type";
             default -> {
                 String msg = e.getMessage();

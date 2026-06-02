@@ -471,6 +471,10 @@ public class PlaywrightRenderer implements AutoCloseable {
         if (browser != null && browser.isConnected()) return;
 
         // Close stale resources before reinitializing (e.g. after browser disconnect).
+        // closePersistentContext() must be called first so that persistentContext/persistentPage
+        // are nulled out before playwright.close() releases them — otherwise the next render()
+        // call finds stale non-null references to already-closed objects.
+        closePersistentContext();
         if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
         playwright = null;
         browser = null;
