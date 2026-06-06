@@ -134,14 +134,16 @@ public class MatchEngine {
      * <p><b>Regex pass:</b> uses the same pattern as {@link #countMatches} for {@code default}
      * and {@code exact} modes.
      *
-     * <p><b>Simplified pass:</b> runs only when the regex pass found nothing and mode is not
-     * {@code exact}. Builds a character-position map from the simplified string back to the
-     * original string so the snippet contains the original accented characters (not the stripped
-     * version). For example, searching {@code "Tomas"} will find and highlight {@code "Tomáš"}
-     * in its original form in the returned snippet. In default mode the simplified pass is skipped
-     * when the keyword contains ASCII special characters (e.g. {@code "node.js"}) to avoid false
-     * positives; in fuzzy mode it is always allowed because fuzzy matching intentionally strips
-     * punctuation (consistent with {@link #countMatches} fuzzy behaviour).
+     * <p><b>Simplified pass:</b> runs when mode is not {@code exact} and the result list has
+     * not yet reached {@code maxSnippets}. Builds a character-position map from the simplified
+     * string back to the original string so snippets contain the original accented characters.
+     * For example, searching {@code "Tomas"} will highlight {@code "Tomáš"} in its original form.
+     * Running the simplified pass alongside the regex pass (not only as a fallback) ensures that
+     * text containing both a plain variant ({@code "cafe"}) and an accented variant ({@code "Café"})
+     * produces a snippet for each — consistent with {@link #countMatches} which always runs both
+     * passes. In default mode the simplified pass is still skipped when the keyword contains ASCII
+     * special characters (e.g. {@code "node.js"}) to avoid false positives; in fuzzy mode it is
+     * always allowed because fuzzy matching intentionally strips punctuation.
      *
      * @param text        the string to search.
      * @param keyword     the keyword to search for.
@@ -170,17 +172,22 @@ public class MatchEngine {
 
         // Simplified pass: catches diacritic variants the regex misses (e.g. "Tomas" matching "Tomáš").
         // Builds a per-character position map from simplified text back to flat so snippet boundaries
-        // are accurate in the original string.
+        // are accurate in the original string. Runs alongside the regex pass (not as a fallback) so
+        // that text with both plain and accented variants (e.g. "cafe Café") produces snippets for
+        // each — consistent with countMatches, which always runs both passes. The seen set prevents
+        // duplicates when simplified finds the same position as regex.
         //
         // Guard logic:
         //  - Skipped in exact mode (user wants a literal match).
+        //  - Skipped when results are already at capacity (results.size() >= maxSnippets) — avoids
+        //    the expensive simpleBuf/origPos build when no more snippets can be added.
         //  - In default mode: skipped when the keyword contains ASCII special characters
         //    (e.g. "more*", "node.js") because stripping them changes the intended search term.
         //  - In fuzzy mode: always allowed, even for ASCII-special keywords. Fuzzy mode
         //    intentionally strips specials (mirrors countFuzzyMatches first pass), so
         //    "node.js" should find "nodejs" both in count and in snippets.
         boolean keywordHasAsciiSpecial = hasAsciiSpecialChars(keyword);
-        if (results.isEmpty() && !mode.equals("exact") && (!keywordHasAsciiSpecial || mode.equals("fuzzy"))) {
+        if (results.size() < maxSnippets && !mode.equals("exact") && (!keywordHasAsciiSpecial || mode.equals("fuzzy"))) {
             String simpleKeyword = superSimplify(keyword);
             if (simpleKeyword.length() >= 2) {
                 StringBuilder simpleBuf = new StringBuilder(flat.length());

@@ -52,6 +52,17 @@ public class MainTest {
     }
 
     @Test
+    public void testFuzzyModeLevenshteinSecondPass() {
+        MatchEngine engine = new MatchEngine();
+        // "kiten" is edit distance 1 from "kitten". superSimplify won't find "kitten" as a
+        // substring of "kiten", so the Levenshtein word-level pass must catch it.
+        // Threshold for "kitten" (6 chars > 4) is ≤ 2; distance is 1.
+        assertEquals(1, engine.countMatches("The kiten sat on the mat", "kitten", "fuzzy"));
+        // Keyword ≤ 4 chars uses threshold 1; "helo" (distance 1 from "hell") must also match.
+        assertEquals(1, engine.countMatches("I said helo to them", "hell", "fuzzy"));
+    }
+
+    @Test
     public void testMatchEngineSingleCharFallbackSuppressed() {
         MatchEngine engine = new MatchEngine();
         // "(C)" strips to "c" and "C++" strips to "c" — a 1-char fallback must not
@@ -124,6 +135,19 @@ public class MainTest {
     }
 
     @Test
+    public void testFindSnippetsDefaultModeCatchesDiacriticVariantWhenRegexAlsoFound() {
+        MatchEngine engine = new MatchEngine();
+        // Regression: simplified pass was guarded by results.isEmpty(). When regex already found
+        // "cafe", the pass was skipped and "Café" got no snippet. Now the guard is
+        // results.size() < maxSnippets, so both variants produce a snippet.
+        String text = "cafe here " + "word ".repeat(25) + "then Café appears";
+        List<String> snips = engine.findSnippets(text, "cafe", "default", 5);
+        assertEquals(2, snips.size());
+        assertTrue(snips.stream().anyMatch(s -> s.contains("cafe")));
+        assertTrue(snips.stream().anyMatch(s -> s.contains("Café")));
+    }
+
+    @Test
     public void testCliOptions() {
         String[] args = {"-u", "http://example.com", "-k", "test", "-d", "2", "-m", "exact"};
         CliOptions options = CliOptions.parse(args);
@@ -183,6 +207,23 @@ public class MainTest {
         assertEquals(0, (int) result.errorCounts.get(CrawlResult.ErrorType.PARSE_ERROR));
         assertEquals(1, (int) result.errorCounts.get(CrawlResult.ErrorType.BLOCKED));
         assertEquals("403", result.blockedUrls.get("http://blocked.com"));
+    }
+
+    @Test
+    public void testClassifyExceptionMapsKnownTypes() {
+        // classifyException is private; verify its mapping indirectly via addNetworkError.
+        CrawlResult result = new CrawlResult();
+        result.addNetworkError(new java.net.SocketTimeoutException("connect timed out"));
+        result.addNetworkError(new java.net.UnknownHostException("host.example.com"));
+        result.addNetworkError(new java.net.ConnectException("Connection refused"));
+        result.addNetworkError(new javax.net.ssl.SSLHandshakeException("bad cert"));
+        result.addNetworkError(new javax.net.ssl.SSLPeerUnverifiedException("cert not trusted"));
+
+        assertEquals(5, (int) result.errorCounts.get(CrawlResult.ErrorType.NETWORK_ERROR));
+        assertEquals(1, (int) result.networkErrorReasons.get("Timeout"));
+        assertEquals(1, (int) result.networkErrorReasons.get("DNS failure"));
+        assertEquals(1, (int) result.networkErrorReasons.get("Connection refused"));
+        assertEquals(2, (int) result.networkErrorReasons.get("SSL error"));
     }
 
     @Test
