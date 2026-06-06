@@ -169,6 +169,9 @@ public class ContentExtractor {
         } catch (TimeoutException e) {
             future.cancel(true);
             return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
         } catch (Exception e) {
             return null;
         }

@@ -72,6 +72,18 @@ public class ReportWriterTest {
     }
 
     @Test
+    public void testTextOutputShowsNetworkErrorReasons() {
+        CrawlResult result = new CrawlResult();
+        result.addNetworkError(new java.net.SocketTimeoutException("timed out"));
+        result.addNetworkError(new java.net.SocketTimeoutException("timed out"));
+        result.addNetworkError(new java.net.UnknownHostException("bad.host"));
+        new ReportWriter().printTextOutput(result);
+        String output = out.toString();
+        assertTrue(output.contains("Timeout: 2"));
+        assertTrue(output.contains("DNS failure: 1"));
+    }
+
+    @Test
     public void testJsonOutputStructure() {
         new ReportWriter().printJsonOutput(sampleResult(), sampleOptions());
         String json = out.toString();
@@ -83,6 +95,17 @@ public class ReportWriterTest {
         assertTrue(json.contains("\"total_matches\": 4"));
         assertTrue(json.contains("\"pages_visited\": 2"));
         assertTrue(json.contains("\"pages_parsed\": 2"));
+    }
+
+    @Test
+    public void testJsonOutputContainsStoppedEarlyWhenMaxHitsReached() {
+        CrawlResult result = new CrawlResult();
+        result.stoppedAtMaxHits = 10;
+        result.addMatch("http://example.com/a", 3);
+        new ReportWriter().printJsonOutput(result, sampleOptions());
+        String json = out.toString();
+        assertTrue(json.contains("\"stopped_early\""));
+        assertTrue(json.contains("max-hits limit of 10 reached"));
     }
 
     @Test

@@ -85,7 +85,7 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 
 ### Matching Modes
 
-- **Default**: Case-insensitive with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. Both a case-insensitive regex pass and a diacritic-stripped, punctuation-removed pass always run; the higher match count is returned. This ensures mixed text like `"cafe Café"` counts both variants rather than only one.
+- **Default**: Case-insensitive with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. Both a case-insensitive regex pass and a diacritic-stripped, punctuation-removed pass run; the higher match count is returned. This ensures mixed text like `"cafe Café"` counts both variants rather than only one. (The diacritic-stripped pass is skipped for keywords that contain ASCII special characters such as `node.js`, `.NET`, or `C++`, since stripping punctuation would change the intended search term.)
 - **Exact**: Strict case-sensitive literal match. `hello` does not match `Hello`.
 - **Fuzzy**: First tries a normalised substring match. If that fails, splits the text into words and accepts any word within Levenshtein edit distance 1 (for keywords ≤ 4 characters) or 2 (for longer keywords). Catches common typos and spelling variants.
 
