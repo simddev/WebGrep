@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * Protocol-relative URLs ({@code //example.com/...}) are expanded using the base URL's scheme.
  *
  * <p>{@link #isIgnoredLink(String)} returns {@code true} for URLs that are never useful to
- * crawl — static assets (CSS, JS, images, fonts, video, archives), known social-share redirect
+ * crawl  -  static assets (CSS, JS, images, fonts, video, archives), known social-share redirect
  * URLs, and tag/author taxonomy pages. Document URLs (PDF, DOCX, TXT) are explicitly
  * <em>not</em> ignored so that Tika can extract their text.
  */
@@ -137,18 +137,18 @@ public class UrlUtils {
      *
      * <p>The following categories are ignored:
      * <ul>
-     *   <li><b>Static assets</b> — CSS, JavaScript, images ({@code .png}, {@code .jpg},
+     *   <li><b>Static assets</b>  -  CSS, JavaScript, images ({@code .png}, {@code .jpg},
      *       {@code .jpeg}, {@code .gif}, {@code .svg}, {@code .ico}), web fonts ({@code .woff},
      *       {@code .woff2}, {@code .ttf}, {@code .otf}), audio/video ({@code .mp3}, {@code .mp4},
      *       {@code .wav}, {@code .avi}, {@code .mov}, {@code .wmv}), and archives ({@code .zip},
      *       {@code .rar}, {@code .7z}, {@code .tar.gz}).</li>
-     *   <li><b>Social share redirects</b> — Google Ads, DoubleClick, Facebook sharer, Twitter
+     *   <li><b>Social share redirects</b>  -  Google Ads, DoubleClick, Facebook sharer, Twitter
      *       intent, LinkedIn share, Pinterest pin.</li>
-     *   <li><b>Taxonomy pages</b> — paths containing {@code /tag/}, {@code /tags/}, or
+     *   <li><b>Taxonomy pages</b>  -  paths containing {@code /tag/}, {@code /tags/}, or
      *       {@code /author/}, which typically generate thousands of near-duplicate listing pages.</li>
      * </ul>
      *
-     * <p>Document URLs (PDF, DOCX, etc.) are explicitly <em>not</em> ignored — {@link #isDocumentLink}
+     * <p>Document URLs (PDF, DOCX, etc.) are explicitly <em>not</em> ignored  -  {@link #isDocumentLink}
      * is checked first and takes priority, ensuring those files are always fetched.
      *
      * @param url the normalised absolute URL to test.

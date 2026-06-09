@@ -9,14 +9,14 @@ import java.util.Optional;
 /**
  * Locates system-installed browser binaries for use with Playwright.
  *
- * <p>Chromium/Chrome is checked first because those browsers speak CDP natively — Playwright
+ * <p>Chromium/Chrome is checked first because those browsers speak CDP natively  -  Playwright
  * can drive any system Chrome or Chromium via {@code executablePath} without any custom
  * protocol patches. Firefox is checked second; Playwright's Firefox needs its own patched
  * build, so system Firefox support is best-effort and may fail on pre-release channels.
  *
  * <p>Discovery order on every platform: Chromium/Chrome first (always compatible via CDP),
  * then system Firefox in install-path order (Dev Edition → Nightly → stable → ESR).
- * Chromium is a true preference; Firefox discovery order is not — Dev Edition and Nightly
+ * Chromium is a true preference; Firefox discovery order is not  -  Dev Edition and Nightly
  * may be incompatible with Playwright's patched protocol, so {@link PlaywrightRenderer}
  * catches the launch exception and falls through silently to the next tier.
  * Hard-coded OS paths are checked first for speed; {@code which} / {@code where} is used
@@ -164,7 +164,7 @@ public class BrowserFinder {
      * {@code where} (Windows) for each of the supplied command names, in order.
      *
      * <p>The first line of output from a successful {@code which}/{@code where} invocation is
-     * parsed as a file path. The path is returned only if the file is executable on disk —
+     * parsed as a file path. The path is returned only if the file is executable on disk  - 
      * this guards against stale {@code PATH} entries that point to scripts or aliases.
      *
      * @param names one or more command names to search for, tried in order.

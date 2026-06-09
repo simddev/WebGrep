@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * Accumulates the results and statistics produced by a single web crawl run.
  *
- * <p>Mutable by design — the {@link com.webgrep.core.Crawler} fills in fields as pages are
+ * <p>Mutable by design  -  the {@link com.webgrep.core.Crawler} fills in fields as pages are
  * visited, and {@link ReportWriter} reads them when the crawl is complete. Fields are public
  * for direct access to keep the data-transfer style simple.
  *

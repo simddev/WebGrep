@@ -9,9 +9,9 @@ import java.util.Set;
  *
  * <p>Supports three mutually exclusive input modes:
  * <ul>
- *   <li><b>Web crawl</b> — {@code --url} with optional depth, delay, and crawl controls</li>
- *   <li><b>Local file</b> — {@code --file} searches a single file offline</li>
- *   <li><b>Local folder</b> — {@code --folder} recursively searches all files in a directory</li>
+ *   <li><b>Web crawl</b>  -  {@code --url} with optional depth, delay, and crawl controls</li>
+ *   <li><b>Local file</b>  -  {@code --file} searches a single file offline</li>
+ *   <li><b>Local folder</b>  -  {@code --folder} recursively searches all files in a directory</li>
  * </ul>
  *
  * <p>Use {@link #parse(String[])} to build an instance from raw CLI arguments,
@@ -255,7 +255,7 @@ public class CliOptions {
         if (help || installBrowser) return;
         int inputCount = (url != null ? 1 : 0) + (file != null ? 1 : 0) + (folder != null ? 1 : 0);
         if (inputCount > 1)
-            throw new IllegalArgumentException("--url, --file, and --folder are mutually exclusive — specify only one");
+            throw new IllegalArgumentException("--url, --file, and --folder are mutually exclusive  -  specify only one");
         if (inputCount == 0)
             throw new IllegalArgumentException("Specify a target: --url <URL>, --file <path>, or --folder <path>");
         if (url != null) {

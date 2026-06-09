@@ -27,8 +27,8 @@ import java.util.stream.Collectors;
  *
  * <h2>Browser resolution order (first available wins)</h2>
  * <ol>
- *   <li>System Chromium/Chrome — drives natively via CDP, most reliable</li>
- *   <li>System Firefox — best-effort; may fail on Dev/Nightly editions</li>
+ *   <li>System Chromium/Chrome  -  drives natively via CDP, most reliable</li>
+ *   <li>System Firefox  -  best-effort; may fail on Dev/Nightly editions</li>
  *   <li>Playwright's cached Firefox (~/.cache/ms-playwright)</li>
  *   <li>Playwright's cached Chromium</li>
  *   <li>Prompt user to download Firefox (default) or Chromium</li>
@@ -152,15 +152,15 @@ public class PlaywrightRenderer implements AutoCloseable {
      *
      * <p>Detection signals (any one is sufficient):
      * <ul>
-     *   <li>{@code <html ng-version="…">} — Angular</li>
-     *   <li>{@code <html data-beasties-container>} — Angular SSR shell</li>
-     *   <li>{@code <html data-n-head>} — Nuxt.js</li>
-     *   <li>{@code [data-reactroot]} element — React</li>
-     *   <li>{@code <script id="__NEXT_DATA__">} — Next.js</li>
-     *   <li>{@code <app-root>} with &lt; 100 chars of text — Angular empty shell</li>
-     *   <li>{@code <div id="root">} or {@code <div id="app">} with &lt; 100 chars — React/Vue shell</li>
-     *   <li>Body text &lt; 100 chars + any JS bundle — generic SPA shell</li>
-     *   <li>Body text &lt; 300 chars + 2 or more JS bundles — stronger generic SPA signal</li>
+     *   <li>{@code <html ng-version="…">}  -  Angular</li>
+     *   <li>{@code <html data-beasties-container>}  -  Angular SSR shell</li>
+     *   <li>{@code <html data-n-head>}  -  Nuxt.js</li>
+     *   <li>{@code [data-reactroot]} element  -  React</li>
+     *   <li>{@code <script id="__NEXT_DATA__">}  -  Next.js</li>
+     *   <li>{@code <app-root>} with &lt; 100 chars of text  -  Angular empty shell</li>
+     *   <li>{@code <div id="root">} or {@code <div id="app">} with &lt; 100 chars  -  React/Vue shell</li>
+     *   <li>Body text &lt; 100 chars + any JS bundle  -  generic SPA shell</li>
+     *   <li>Body text &lt; 300 chars + 2 or more JS bundles  -  stronger generic SPA signal</li>
      * </ul>
      *
      * @param doc the Jsoup-parsed HTML of the plain HTTP response.
@@ -179,7 +179,7 @@ public class PlaywrightRenderer implements AutoCloseable {
         if (rootDiv != null && rootDiv.text().length() < 100) return true;
         String bodyText = doc.body() != null ? doc.body().text() : "";
         // Minimal body (< 100 chars, e.g. "Loading...") + any JS bundle → likely SPA shell.
-        // Slightly longer body (< 300 chars) requires 2+ bundles — SPAs always load multiple
+        // Slightly longer body (< 300 chars) requires 2+ bundles  -  SPAs always load multiple
         // chunks, whereas a static page with a single analytics script has only one.
         var scripts = doc.select("script[src*='.js']");
         return bodyText.length() < 100 && !scripts.isEmpty()
@@ -192,7 +192,7 @@ public class PlaywrightRenderer implements AutoCloseable {
      *
      * <p>A persistent browser context is reused across consecutive calls to the same domain
      * (same scheme+host). For SPA sub-routes this means the JavaScript bundle is already loaded
-     * and the router just swaps components — typically 150–400 ms instead of 10–15 s per page.
+     * and the router just swaps components  -  typically 150–400 ms instead of 10–15 s per page.
      *
      * <p>A new context is created when:
      * <ul>
@@ -203,7 +203,7 @@ public class PlaywrightRenderer implements AutoCloseable {
      * <p>Link collection uses {@code a.href} (the DOM property) rather than
      * {@code a.getAttribute('href')} so that relative links are resolved against the page's
      * {@code <base href>} tag. Angular SPAs set {@code <base href="/app/">} and use bare
-     * relative hrefs like {@code api/v1/files/123/download} — resolving those manually against
+     * relative hrefs like {@code api/v1/files/123/download}  -  resolving those manually against
      * the route URL gives the wrong path; {@code a.href} gives the correct absolute URL.
      *
      * <p>Resource blocking: images, fonts, stylesheets, and media are aborted in the browser
@@ -235,7 +235,7 @@ public class PlaywrightRenderer implements AutoCloseable {
 
             // Keep a single BrowserContext and Page alive across renders on the same domain.
             // For SPA sub-routes, this means the JavaScript bundle is already loaded and the
-            // router just swaps components — typically 1–3 s instead of 10–15 s per page.
+            // router just swaps components  -  typically 1–3 s instead of 10–15 s per page.
             boolean needsNewPage = persistentPage == null || persistentPage.isClosed()
                     || !urlBase.equals(persistentBaseUrl);
             if (needsNewPage) {
@@ -243,7 +243,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                 Browser.NewContextOptions ctxOpts = new Browser.NewContextOptions()
                         .setIgnoreHTTPSErrors(insecure);
                 persistentContext = browser.newContext(ctxOpts);
-                // Block images, fonts, stylesheets and media — they add no text content and
+                // Block images, fonts, stylesheets and media  -  they add no text content and
                 // slow down navigation + delay NETWORKIDLE by triggering extra resource fetches.
                 persistentContext.route("**/*", route -> {
                     String rt = route.request().resourceType();
@@ -268,7 +268,7 @@ public class PlaywrightRenderer implements AutoCloseable {
             try {
                 persistentPage.navigate(url);
             } catch (TimeoutError e) {
-                // Navigation itself timed out — return null for this page but keep the
+                // Navigation itself timed out  -  return null for this page but keep the
                 // renderer alive; a slow page shouldn't disable SPA rendering entirely.
                 return null;
             }
@@ -289,7 +289,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                 } catch (TimeoutError ignored) {}
             } else {
                 // Subsequent same-domain SPA navigations: the router just swaps components.
-                // Wait until the content area has non-trivial text — resolves as soon as the
+                // Wait until the content area has non-trivial text  -  resolves as soon as the
                 // route renders (typically 150–400 ms) instead of the full NETWORKIDLE tail.
                 try {
                     persistentPage.waitForFunction(
@@ -304,13 +304,13 @@ public class PlaywrightRenderer implements AutoCloseable {
             }
 
             // Single evaluate round-trip: extract both innerText and resolved hrefs together.
-            // Previous approach called querySelectorAll then getAttribute per element — one
+            // Previous approach called querySelectorAll then getAttribute per element  -  one
             // IPC call per anchor (80+ on some pages), adding ~150ms and leaking ElementHandles.
             @SuppressWarnings("unchecked")
             Map<String, Object> snapshot = (Map<String, Object>) persistentPage.evaluate(
                     // Use a.href (the DOM property) instead of a.getAttribute('href') so that
                     // relative URLs are resolved via the page's <base href> tag, not the page URL.
-                    // Angular apps set <base href="/app/"> and use hrefs like "api/v1/..." — those
+                    // Angular apps set <base href="/app/"> and use hrefs like "api/v1/..."  -  those
                     // would resolve incorrectly against the current route if we used getAttribute.
                     "(base) => {"
                     + "  const ls = [], ds = [];"
@@ -349,7 +349,7 @@ public class PlaywrightRenderer implements AutoCloseable {
 
             // Round-trip cookies for the crawled host back to the crawler's jar so they
             // survive context switches and are available to the Jsoup fetcher.
-            // Only include cookies scoped to the page's own domain — third-party cookies
+            // Only include cookies scoped to the page's own domain  -  third-party cookies
             // set by analytics scripts must not be filed under the wrong host.
             Map<String, String> contextCookies = new HashMap<>();
             if (persistentContext != null) {
@@ -373,7 +373,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                     captured.stream().distinct().collect(Collectors.toList()),
                     contextCookies);
         } catch (Exception e) {
-            // Page-level error (JS exception, stale context, etc.) — skip this page but
+            // Page-level error (JS exception, stale context, etc.)  -  skip this page but
             // keep the renderer alive so subsequent pages can still be rendered.
             String cause = e.getMessage() != null
                     ? e.getMessage().lines().findFirst().orElse("unknown error")
@@ -448,9 +448,9 @@ public class PlaywrightRenderer implements AutoCloseable {
      * <p>If the browser is already connected, returns immediately. Otherwise, attempts to
      * launch a browser through the following five tiers in order:
      * <ol>
-     *   <li>System Chromium/Chrome (found via {@link BrowserFinder#findChromium}) — most
+     *   <li>System Chromium/Chrome (found via {@link BrowserFinder#findChromium})  -  most
      *       reliable because Chromium speaks CDP natively.</li>
-     *   <li>System Firefox (found via {@link BrowserFinder#findFirefox}) — best-effort;
+     *   <li>System Firefox (found via {@link BrowserFinder#findFirefox})  -  best-effort;
      *       Dev/Nightly editions are often incompatible with Playwright's protocol.</li>
      *   <li>Playwright's cached Firefox ({@code ~/.cache/ms-playwright/firefox-*}).</li>
      *   <li>Playwright's cached Chromium ({@code ~/.cache/ms-playwright/chromium-*}).</li>
@@ -472,7 +472,7 @@ public class PlaywrightRenderer implements AutoCloseable {
 
         // Close stale resources before reinitializing (e.g. after browser disconnect).
         // closePersistentContext() must be called first so that persistentContext/persistentPage
-        // are nulled out before playwright.close() releases them — otherwise the next render()
+        // are nulled out before playwright.close() releases them  -  otherwise the next render()
         // call finds stale non-null references to already-closed objects.
         closePersistentContext();
         if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
@@ -483,7 +483,7 @@ public class PlaywrightRenderer implements AutoCloseable {
         boolean wantFirefox  = "firefox".equalsIgnoreCase(preferredBrowser);
 
         // ── 1. System Chromium / Chrome ───────────────────────────────────────
-        // Chromium-family browsers speak CDP natively — Playwright drives them via
+        // Chromium-family browsers speak CDP natively  -  Playwright drives them via
         // executablePath without any custom patches, so this is the most reliable option.
         if (!wantFirefox) {
             Optional<Path> sysChr = BrowserFinder.findChromium();
@@ -512,7 +512,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                     System.err.printf("  SPA renderer: using system Firefox (%s)%n", sysFf.get());
                     return;
                 } catch (Exception e) {
-                    // Dev/Nightly often incompatible with Playwright's protocol — fall through silently.
+                    // Dev/Nightly often incompatible with Playwright's protocol  -  fall through silently.
                     cleanupPlaywright();
                 }
             }
@@ -534,7 +534,7 @@ public class PlaywrightRenderer implements AutoCloseable {
             return;
         }
 
-        // ── 5. Nothing found — ask user which browser to download ─────────────
+        // ── 5. Nothing found  -  ask user which browser to download ─────────────
         // Refuse to download silently in non-interactive sessions (CI, piped output,
         // Docker). Without a TTY the user cannot confirm the download; they must run
         // 'webgrep --install-browser' explicitly first.
@@ -588,7 +588,7 @@ public class PlaywrightRenderer implements AutoCloseable {
         System.err.printf("%n  Downloading Playwright %s for SPA rendering (~%s MB, one-time)...%n",
                 label, isChromium ? "120" : "105");
 
-        // CLI.main() calls System.exit() on completion — which would terminate the running crawl.
+        // CLI.main() calls System.exit() on completion  -  which would terminate the running crawl.
         // Run the installer in a subprocess so the JVM process survives the download.
         String javaExe = ProcessHandle.current().info().command().orElse("java");
         String cp = PlaywrightRenderer.class.getProtectionDomain()

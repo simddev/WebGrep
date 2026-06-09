@@ -1,4 +1,4 @@
-# WebGrep — Code Internals
+# WebGrep  -  Code Internals
 
 A detailed walkthrough of every source file: what it does, why it works the way it does, and how the pieces connect.
 
@@ -8,8 +8,8 @@ A detailed walkthrough of every source file: what it does, why it works the way 
 
 1. [High-level data flow](#1-high-level-data-flow)
 2. [Package map](#2-package-map)
-3. [Entry point — `Main.java`](#3-entry-point--mainjava)
-4. [Configuration — `CliOptions.java`](#4-configuration--clioptionsjava)
+3. [Entry point  -  `Main.java`](#3-entry-point--mainjava)
+4. [Configuration  -  `CliOptions.java`](#4-configuration--clioptionsjava)
 5. [Core: `Crawler.java`](#5-core-crawlerjava)
 6. [Core: `PlaywrightRenderer.java`](#6-core-playwrightrendererjava)
 7. [Core: `BrowserFinder.java`](#7-core-browserfinderjava)
@@ -82,7 +82,7 @@ com.webgrep
 
 ---
 
-## 3. Entry point — `Main.java`
+## 3. Entry point  -  `Main.java`
 
 **File:** `src/main/java/com/webgrep/Main.java`
 
@@ -106,9 +106,9 @@ After parsing, `Main` checks three mutually exclusive branches:
 
 | Condition | Mode |
 |---|---|
-| `options.getFolder() != null` | folder scan — `scanFolder()` |
-| `options.getFile() != null` | single file — `scanLocalFile()` |
-| otherwise | web crawl — `new Crawler(…).crawl()` |
+| `options.getFolder() != null` | folder scan  -  `scanFolder()` |
+| `options.getFile() != null` | single file  -  `scanLocalFile()` |
+| otherwise | web crawl  -  `new Crawler(…).crawl()` |
 
 ### 3.3 `scanFolder()`
 
@@ -137,12 +137,12 @@ static List<FileMatch> findLineMatches(String text, String keyword, String mode,
 
 Handles the `--install-browser` flag. Checks for a usable browser in priority order and reports it without downloading if one is found:
 
-1. **System Chromium/Chrome** — trusted unconditionally (CDP-native).
-2. **Playwright-cached Firefox** (`~/.cache/ms-playwright/firefox-*`) — previously downloaded, always compatible.
-3. **Playwright-cached Chromium** (`~/.cache/ms-playwright/chromium-*`) — same as above.
-4. **System Firefox stable** — trusted unless the path contains `developer-edition` (Linux) or `developer edition` (macOS/Windows) or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
+1. **System Chromium/Chrome**  -  trusted unconditionally (CDP-native).
+2. **Playwright-cached Firefox** (`~/.cache/ms-playwright/firefox-*`)  -  previously downloaded, always compatible.
+3. **Playwright-cached Chromium** (`~/.cache/ms-playwright/chromium-*`)  -  same as above.
+4. **System Firefox stable**  -  trusted unless the path contains `developer-edition` (Linux) or `developer edition` (macOS/Windows) or `nightly`. Dev Edition and Nightly are incompatible with Playwright's patched protocol and are skipped so the user is prompted to download a compatible build.
 
-If no compatible browser is found, the user is prompted to choose Firefox or Chromium (or `--browser` preference is used), and `com.microsoft.playwright.CLI.main(new String[]{"install", …})` — the official Playwright CLI installer — downloads and installs it.
+If no compatible browser is found, the user is prompted to choose Firefox or Chromium (or `--browser` preference is used), and `com.microsoft.playwright.CLI.main(new String[]{"install", …})`  -  the official Playwright CLI installer  -  downloads and installs it.
 
 ### 3.6 Error handling
 
@@ -152,11 +152,11 @@ Two catch levels:
 
 ---
 
-## 4. Configuration — `CliOptions.java`
+## 4. Configuration  -  `CliOptions.java`
 
 **File:** `src/main/java/com/webgrep/config/CliOptions.java`
 
-`CliOptions` is a pure data class that parses raw `String[] args` and validates the result. No logic beyond parsing and validation — it does not execute anything.
+`CliOptions` is a pure data class that parses raw `String[] args` and validates the result. No logic beyond parsing and validation  -  it does not execute anything.
 
 ### 4.1 How parsing works
 
@@ -242,9 +242,9 @@ private final SSLSocketFactory insecureSslFactory;
 The cookie jar is a two-level map scoped by host so that cookies from site A are never sent to site B when `--allow-external` is used.
 
 `spaRenderingEnabled` is a three-state `Boolean` (boxed):
-- `null` — the user hasn't been asked yet
-- `true` — user said yes (or non-interactive mode)
-- `false` — user said no
+- `null`  -  the user hasn't been asked yet
+- `true`  -  user said yes (or non-interactive mode)
+- `false`  -  user said no
 
 ### 5.2 Domain scoping
 
@@ -283,7 +283,7 @@ For each URL popped from the queue:
 
 1. **Fetch** via `fetchWithRetry()`.
 2. **Store cookies** from the response.
-3. **Track effective URL** — Jsoup follows redirects; the final URL after redirects is the canonical URL for this page. It is marked as queued so no other link to it triggers a duplicate visit.
+3. **Track effective URL**  -  Jsoup follows redirects; the final URL after redirects is the canonical URL for this page. It is marked as queued so no other link to it triggers a duplicate visit.
 4. **Check Content-Type:**
    - `text/html` or `application/xhtml+xml` → HTML path
    - Anything else → binary path (Tika)
@@ -293,8 +293,8 @@ For each URL popped from the queue:
 - Cloudflare/bot-protection check: if the page title contains "Just a moment..." or body text contains "Enable JavaScript and cookies to continue", the URL is added to `blockedUrls`.
 - `ContentExtractor.extractTextFromHtml(doc)` extracts title + body text + meta tags.
 - `ContentExtractor.extractLinks(doc, …)` extracts all `<a href>` links and splits them into:
-  - `docLinksToEnqueue` — links whose path ends in a known document extension (PDF, DOCX, etc.)
-  - `navLinks` — all other links (HTML pages, unknown paths)
+  - `docLinksToEnqueue`  -  links whose path ends in a known document extension (PDF, DOCX, etc.)
+  - `navLinks`  -  all other links (HTML pages, unknown paths)
 - **SPA detection:** calls `PlaywrightRenderer.isSpa(doc)`. If true, the user is prompted (once) and `PlaywrightRenderer.render()` is called. The rendered result replaces the Jsoup-extracted text and links.
 
 **Binary path:**
@@ -306,7 +306,7 @@ For each URL popped from the queue:
 - `MatchEngine.findSnippets()` extracts up to 3 context snippets around each match.
 - Results are recorded via `crawlResult.addMatch()` and `crawlResult.addSnippets()`.
 
-**Link enqueuing — the key distinction:**
+**Link enqueuing  -  the key distinction:**
 ```java
 // Document links bypass the depth limit
 for (String docLink : docLinksToEnqueue) {
@@ -321,7 +321,7 @@ if (current.depth < options.getDepth()) {
 }
 ```
 
-The reason document links bypass the depth check: documents are leaf nodes — they don't link to other pages, so enqueuing them can never cause the crawl to expand exponentially beyond the intended boundary. A PDF linked from a depth-1 page should be fetched even if `--depth 1` would otherwise stop there.
+The reason document links bypass the depth check: documents are leaf nodes  -  they don't link to other pages, so enqueuing them can never cause the crawl to expand exponentially beyond the intended boundary. A PDF linked from a depth-1 page should be fetched even if `--depth 1` would otherwise stop there.
 
 Navigation links are capped at the depth limit to prevent unbounded crawls.
 
@@ -375,29 +375,29 @@ Uses `\r` (carriage return) to overwrite the same line in the terminal. Printed 
 public record RenderedPage(String text, List<String> links, List<String> docLinks, Map<String, String> cookies) {}
 ```
 
-- `text` — visible text extracted from the rendered DOM
-- `links` — all `<a href>` URLs found in the rendered page (fully resolved via `a.href`)
-- `docLinks` — document download URLs found in intercepted JSON responses + `<a download>` links
-- `cookies` — cookies set by the browser session, to be returned to the Crawler's cookie jar
+- `text`  -  visible text extracted from the rendered DOM
+- `links`  -  all `<a href>` URLs found in the rendered page (fully resolved via `a.href`)
+- `docLinks`  -  document download URLs found in intercepted JSON responses + `<a download>` links
+- `cookies`  -  cookies set by the browser session, to be returned to the Crawler's cookie jar
 
-### 6.2 SPA detection — `isSpa(doc)`
+### 6.2 SPA detection  -  `isSpa(doc)`
 
 ```java
 public static boolean isSpa(Document doc) { … }
 ```
 
 Called by `Crawler` on the Jsoup-parsed HTML before any browser is started. Returns `true` if any of these signals are present:
-- `<html ng-version="…">` — Angular
-- `<html data-beasties-container>` — Angular SSR (static shell)
-- `<html data-n-head>` — Nuxt.js
-- `[data-reactroot]` — React
-- `<script id="__NEXT_DATA__">` — Next.js
-- `<app-root>` with < 100 characters of text — Angular (empty shell)
-- `<div id="root">` or `<div id="app">` with < 100 characters — React/Vue (empty shell)
-- Body text < 100 chars + any JS bundles — generic SPA shell
-- Body text < 300 chars + 2 or more JS bundles — stronger generic SPA signal
+- `<html ng-version="…">`  -  Angular
+- `<html data-beasties-container>`  -  Angular SSR (static shell)
+- `<html data-n-head>`  -  Nuxt.js
+- `[data-reactroot]`  -  React
+- `<script id="__NEXT_DATA__">`  -  Next.js
+- `<app-root>` with < 100 characters of text  -  Angular (empty shell)
+- `<div id="root">` or `<div id="app">` with < 100 characters  -  React/Vue (empty shell)
+- Body text < 100 chars + any JS bundles  -  generic SPA shell
+- Body text < 300 chars + 2 or more JS bundles  -  stronger generic SPA signal
 
-### 6.3 Browser resolution — `ensureReady()`
+### 6.3 Browser resolution  -  `ensureReady()`
 
 Called every time `render()` is invoked. Tries five tiers in order:
 
@@ -415,7 +415,7 @@ In non-interactive mode (`System.console() == null`), tier 5 throws an `IOExcept
 
 **Why tier 5 uses a subprocess:** `com.microsoft.playwright.CLI.main()` calls `System.exit(0)` when the download completes. Calling it in-process during an active crawl would kill the JVM and discard all results collected so far. Instead, `downloadAndLaunch()` spawns a child process via `ProcessBuilder` to run the installer. The parent JVM waits for the child to finish, then launches the browser normally.
 
-`initPlaywright()` sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in the environment to prevent Playwright from downloading any browser during `Playwright.create()` — only an explicit subprocess `CLI install …` should download anything.
+`initPlaywright()` sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in the environment to prevent Playwright from downloading any browser during `Playwright.create()`  -  only an explicit subprocess `CLI install …` should download anything.
 
 ### 6.4 Persistent browser context
 
@@ -468,23 +468,23 @@ persistentPage.waitForFunction(
 ```
 Instead of waiting for `NETWORKIDLE` (which can take several seconds), WebGrep polls every 50 ms for the content area to contain at least 100 characters of text. This resolves much faster (typically in 150–400 ms).
 
-### 6.7 DOM snapshot — why `a.href` instead of `a.getAttribute('href')`
+### 6.7 DOM snapshot  -  why `a.href` instead of `a.getAttribute('href')`
 
 ```javascript
-const h = a.href;  // DOM property — fully resolved by browser
+const h = a.href;  // DOM property  -  fully resolved by browser
 ```
 
 The key insight: the browser DOM property `a.href` always returns the **fully resolved absolute URL**. The browser applies the page's `<base href>` tag automatically.
 
 The HTML attribute `a.getAttribute('href')` returns the **raw string from the HTML source**, which may be a bare relative path like `api/v1/files/123/download`.
 
-Problem with `getAttribute`: Angular and other SPAs set `<base href="/app/">` in the HTML head. Relative links like `api/v1/…` are then supposed to be resolved against that base — so the correct URL is `https://example.com/app/api/v1/…`. But if you resolve them manually using `new URL(rawHref, pageURL)`, where `pageURL` is something like `https://example.com/app/uredni-deska/detail`, you get `https://example.com/app/uredni-deska/api/v1/…` — wrong path, 404.
+Problem with `getAttribute`: Angular and other SPAs set `<base href="/app/">` in the HTML head. Relative links like `api/v1/…` are then supposed to be resolved against that base  -  so the correct URL is `https://example.com/app/api/v1/…`. But if you resolve them manually using `new URL(rawHref, pageURL)`, where `pageURL` is something like `https://example.com/app/uredni-deska/detail`, you get `https://example.com/app/uredni-deska/api/v1/…`  -  wrong path, 404.
 
 Solution: use `a.href`, let the browser handle the `<base href>` resolution, and receive the already-correct absolute URL.
 
-The `raw` variable from `a.getAttribute('href')` is still checked first — but only to filter out `javascript:`, `mailto:`, and pure fragment links (`#` or `#something`), which cannot be detected by checking `a.href` alone (the browser resolves `#` to the full current page URL).
+The `raw` variable from `a.getAttribute('href')` is still checked first  -  but only to filter out `javascript:`, `mailto:`, and pure fragment links (`#` or `#something`), which cannot be detected by checking `a.href` alone (the browser resolves `#` to the full current page URL).
 
-### 6.8 JSON API interception — `captureDocLinks()`
+### 6.8 JSON API interception  -  `captureDocLinks()`
 
 ```java
 persistentPage.onResponse(
@@ -496,8 +496,8 @@ Playwright fires an event for every HTTP response the browser receives. `capture
 1. Only processes HTTP 200 responses with `Content-Type: application/json`.
 2. Skips responses larger than 5 MB to avoid blocking the browser's network thread.
 3. Applies two regex patterns to the response body:
-   - `JSON_DOC_URL` — matches URLs ending in known document extensions (`.pdf`, `.docx`, `.xlsx`, etc.) inside JSON strings.
-   - `JSON_DOWNLOAD_URL` — matches URLs whose final path segment is literally `/download` (common REST API pattern for file download endpoints like `/api/v1/files/123/download`).
+   - `JSON_DOC_URL`  -  matches URLs ending in known document extensions (`.pdf`, `.docx`, `.xlsx`, etc.) inside JSON strings.
+   - `JSON_DOWNLOAD_URL`  -  matches URLs whose final path segment is literally `/download` (common REST API pattern for file download endpoints like `/api/v1/files/123/download`).
 4. Resolves relative URLs against the domain base and adds them to `interceptedLinks`.
 
 `interceptedLinks` is a `Collections.synchronizedList` because the response handler runs on Playwright's internal network thread, not the main thread.
@@ -514,7 +514,7 @@ Before each navigation, cookies from the Crawler's jar (collected by Jsoup from 
 
 After navigation, cookies that the browser set are extracted and returned in `RenderedPage.cookies()`. The Crawler stores these back into its jar for subsequent Jsoup requests to the same host.
 
-Only cookies scoped to the page's own domain are extracted — third-party cookies set by analytics scripts are filtered out to avoid polluting the cookie jar for the wrong host.
+Only cookies scoped to the page's own domain are extracted  -  third-party cookies set by analytics scripts are filtered out to avoid polluting the cookie jar for the wrong host.
 
 ---
 
@@ -551,7 +551,7 @@ For Firefox (checked second):
 - macOS: Firefox Developer Edition, Nightly, stable, ESR
 - Windows: Program Files paths in the same order
 
-Dev Edition and Nightly appear first in the path list because they are often installed alongside stable Firefox (at a distinct path) and should be attempted if available. However, they are *not* preferred over stable Firefox in the compatibility sense — if `PlaywrightRenderer` fails to launch them (Playwright's patched protocol is incompatible), the exception is caught and the tier falls through silently to the Playwright-cached builds.
+Dev Edition and Nightly appear first in the path list because they are often installed alongside stable Firefox (at a distinct path) and should be attempted if available. However, they are *not* preferred over stable Firefox in the compatibility sense  -  if `PlaywrightRenderer` fails to launch them (Playwright's patched protocol is incompatible), the exception is caught and the tier falls through silently to the Playwright-cached builds.
 
 ---
 
@@ -561,17 +561,17 @@ Dev Edition and Nightly appear first in the path list because they are often ins
 
 Responsible for converting raw bytes (HTML or binary documents) into plain searchable text strings.
 
-### 8.1 HTML extraction — `extractTextFromHtml(Document doc)`
+### 8.1 HTML extraction  -  `extractTextFromHtml(Document doc)`
 
 Takes a Jsoup `Document` already parsed from HTML and returns a concatenation of:
-- `doc.title()` — the `<title>` tag
-- `doc.body().text()` — all visible text from the body, whitespace-collapsed by Jsoup
+- `doc.title()`  -  the `<title>` tag
+- `doc.body().text()`  -  all visible text from the body, whitespace-collapsed by Jsoup
 - `meta[name=description]` content
 - `meta[name=keywords]` content
 
 This single string is what `MatchEngine` searches.
 
-### 8.2 Binary extraction — `extractTextFromBinary(byte[] body, String url, String contentType)`
+### 8.2 Binary extraction  -  `extractTextFromBinary(byte[] body, String url, String contentType)`
 
 Used for PDFs, DOCX files, and any other non-HTML response. The flow:
 
@@ -596,7 +596,7 @@ private String tikaParseWithTimeout(byte[] body, Metadata metadata) {
 
 Tika can hang on corrupt or malformed files. Wrapping it in a `Future` with a 30-second timeout prevents one bad file from blocking the entire crawl or folder scan.
 
-`TIKA_EXECUTOR` is a daemon thread pool — daemon threads don't prevent JVM shutdown if the main thread exits.
+`TIKA_EXECUTOR` is a daemon thread pool  -  daemon threads don't prevent JVM shutdown if the main thread exits.
 
 ### 8.4 `tika.setMaxStringLength()`
 
@@ -605,9 +605,9 @@ int tikaLimit = (int) Math.min(Math.max(maxBytes, 50L * 1024 * 1024), Integer.MA
 this.tika.setMaxStringLength(tikaLimit);
 ```
 
-Tika's string output is capped independently of `--max-bytes`. The floor is 50 MB — even if the user sets a small `--max-bytes` to throttle download sizes, local documents in `--file` / `--folder` mode should not be silently truncated.
+Tika's string output is capped independently of `--max-bytes`. The floor is 50 MB  -  even if the user sets a small `--max-bytes` to throttle download sizes, local documents in `--file` / `--folder` mode should not be silently truncated.
 
-### 8.5 Link extraction — `extractLinks(Document doc, byte[] rawBody, String baseUrl)`
+### 8.5 Link extraction  -  `extractLinks(Document doc, byte[] rawBody, String baseUrl)`
 
 Called by `Crawler` for HTML pages to collect all `<a href>` links.
 
@@ -634,7 +634,7 @@ private final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHa
 
 Compiling a regex is expensive. The cache keyed by `keyword + "\0" + mode` ensures each keyword/mode pair is compiled only once, no matter how many pages are searched.
 
-### 9.2 Default mode — case-insensitive with diacritic support
+### 9.2 Default mode  -  case-insensitive with diacritic support
 
 **Regex pass:**
 ```java
@@ -661,8 +661,8 @@ This means searching for `Tomas` will also find `Tomáš` in the text, and vice 
 The simplified count and the regex count are both computed, and the higher value is returned. Why? A text like `"cafe Café"` with keyword `cafe` would yield 1 from regex (misses `Café`) but 2 from the simplified pass.
 
 Two guards protect against false positives:
-- `simpleKeyword.length() >= 2` prevents single-character matches — a keyword like `C++` simplifies to `c`, which would match nearly every word in the text.
-- `!hasAsciiSpecialChars(keyword)` skips the pass entirely when the keyword contains ASCII punctuation (e.g. `more*`, `node.js`, `.NET`). Stripping those characters before matching would change the intended search term — `more*` would silently search for `more` and produce false positives. The pass is safe only for pure Unicode diacritics (e.g. `café` → `cafe`).
+- `simpleKeyword.length() >= 2` prevents single-character matches  -  a keyword like `C++` simplifies to `c`, which would match nearly every word in the text.
+- `!hasAsciiSpecialChars(keyword)` skips the pass entirely when the keyword contains ASCII punctuation (e.g. `more*`, `node.js`, `.NET`). Stripping those characters before matching would change the intended search term  -  `more*` would silently search for `more` and produce false positives. The pass is safe only for pure Unicode diacritics (e.g. `café` → `cafe`).
 
 The `superSimplify(text)` call is deliberately placed inside both guards so it is never run on large page text when the result would be discarded anyway.
 
@@ -684,7 +684,7 @@ An early exit optimises away words whose length difference alone exceeds the thr
 
 ### 9.5 `findSnippets()`
 
-Returns up to `maxSnippets` context strings — short excerpts from the text with the keyword in the middle.
+Returns up to `maxSnippets` context strings  -  short excerpts from the text with the keyword in the middle.
 
 1. Flattens whitespace: replaces tabs, newlines, non-breaking spaces (U+00A0), and runs of spaces with single spaces, so the snippet fits neatly on one output line.
 2. Runs the regex match (same pattern used by `countMatches`). For each match position, calls `buildSnippet()`.
@@ -702,7 +702,7 @@ Prevents the crawler from visiting the same page twice. Handles the tricky case 
 
 ### 10.1 The problem
 
-A naive `Set<String>` deduplicator would re-visit `?id=1&sort=asc` even if `?id=1` was already visited — they are different strings. But a smarter deduplicator would also wrongly suppress `?id=2` as a duplicate of `?id=1` — these are genuinely different pages.
+A naive `Set<String>` deduplicator would re-visit `?id=1&sort=asc` even if `?id=1` was already visited  -  they are different strings. But a smarter deduplicator would also wrongly suppress `?id=2` as a duplicate of `?id=1`  -  these are genuinely different pages.
 
 ### 10.2 Smart dedup rule (when `allUrls = false`)
 
@@ -753,15 +753,15 @@ A mutable data bag filled in by `Crawler` during the crawl and consumed by `Repo
 | `durationMs` | `long` | wall-clock time for the entire crawl |
 | `stoppedAtMaxHits` | `int` | 0 if ran to completion; otherwise the `--max-hits` value that triggered the stop |
 
-`LinkedHashMap` is used (rather than `HashMap`) to preserve insertion order, so results appear in the order pages were visited — which is the BFS/DFS order of the crawl.
+`LinkedHashMap` is used (rather than `HashMap`) to preserve insertion order, so results appear in the order pages were visited  -  which is the BFS/DFS order of the crawl.
 
 ### 11.2 `ErrorType` enum
 
-- `NETWORK_ERROR` — DNS failure, connection refused, timeout, SSL error, unexpected HTTP status
-- `BLOCKED` — HTTP 403, HTTP 429, or bot-protection page detected
-- `PARSE_ERROR` — Jsoup failed to parse the HTML
-- `SKIPPED_SIZE` — response body exceeded `--max-bytes`
-- `SKIPPED_TYPE` — (reserved for future use)
+- `NETWORK_ERROR`  -  DNS failure, connection refused, timeout, SSL error, unexpected HTTP status
+- `BLOCKED`  -  HTTP 403, HTTP 429, or bot-protection page detected
+- `PARSE_ERROR`  -  Jsoup failed to parse the HTML
+- `SKIPPED_SIZE`  -  response body exceeded `--max-bytes`
+- `SKIPPED_TYPE`  -  (reserved for future use)
 
 All error types are pre-populated to 0 in the constructor so callers never need null checks.
 
@@ -783,16 +783,16 @@ public void addMatch(String url, int count) {
 **File:** `src/main/java/com/webgrep/reporting/FileMatch.java`  
 **File:** `src/main/java/com/webgrep/reporting/FileScanResult.java`
 
-Both are Java records — immutable data carriers with no behaviour beyond `FileScanResult.totalMatches()`.
+Both are Java records  -  immutable data carriers with no behaviour beyond `FileScanResult.totalMatches()`.
 
 ```java
 public record FileMatch(int page, int line, int count, String snippet) {}
 ```
 
-- `page` — 1-based page number for multi-page documents; 0 for plain text (no page structure)
-- `line` — 1-based line number within the page
-- `count` — number of keyword occurrences on this line
-- `snippet` — the trimmed line content, truncated to 120 characters
+- `page`  -  1-based page number for multi-page documents; 0 for plain text (no page structure)
+- `line`  -  1-based line number within the page
+- `count`  -  number of keyword occurrences on this line
+- `snippet`  -  the trimmed line content, truncated to 120 characters
 
 ```java
 public record FileScanResult(String path, List<FileMatch> matches) {
@@ -810,9 +810,9 @@ One `FileScanResult` per file. `totalMatches()` is a convenience aggregator used
 
 **File:** `src/main/java/com/webgrep/reporting/ReportWriter.java`
 
-Formats results and prints them to `System.out`. Six public methods — one text and one JSON variant for each of the three modes.
+Formats results and prints them to `System.out`. Six public methods  -  one text and one JSON variant for each of the three modes.
 
-### 13.1 Web crawl text output — `printTextOutput()`
+### 13.1 Web crawl text output  -  `printTextOutput()`
 
 ```
 --- WebGrep Results ---
@@ -833,7 +833,7 @@ Results are sorted by match count (descending) then by URL (ascending). Up to 3 
 
 Blocked URLs are grouped by reason so a flood of 403s doesn't spam hundreds of lines (capped at 10 URLs per reason group).
 
-### 13.2 JSON output — `printJsonOutput()`
+### 13.2 JSON output  -  `printJsonOutput()`
 
 All JSON is built manually via `StringBuilder` rather than a JSON library. This avoids adding a dependency for a relatively simple output structure. Special characters in strings are escaped by `escapeJson()`, which handles `\`, `"`, newlines, carriage returns, tabs, and any control character below `0x20`.
 
@@ -850,7 +850,7 @@ The JSON structure is:
 
 ### 13.3 Folder / file variants
 
-`printFolderTextOutput()` and `printFileTextOutput()` follow the same pattern but show file paths and line numbers instead of URLs. The `hasPages` flag controls whether page numbers appear in the output — it is `true` only when at least one `FileMatch` has `page > 0` (i.e. when Tika produced page separators, meaning the source was a multi-page document like a PDF).
+`printFolderTextOutput()` and `printFileTextOutput()` follow the same pattern but show file paths and line numbers instead of URLs. The `hasPages` flag controls whether page numbers appear in the output  -  it is `true` only when at least one `FileMatch` has `page > 0` (i.e. when Tika produced page separators, meaning the source was a multi-page document like a PDF).
 
 ### 13.4 `formatDuration(long ms)`
 
@@ -898,7 +898,7 @@ Returns `true` for URLs that should never be fetched:
 
 **Taxonomy pages** (typically thousands of near-duplicate listing pages): `/tag/`, `/tags/`, `/author/`
 
-Document extensions (PDF, DOCX, etc.) are explicitly **not** ignored — `isDocumentLink()` is called first and returns `false` from `isIgnoredLink()` if it matches.
+Document extensions (PDF, DOCX, etc.) are explicitly **not** ignored  -  `isDocumentLink()` is called first and returns `false` from `isIgnoredLink()` if it matches.
 
 ---
 
@@ -908,13 +908,13 @@ Document extensions (PDF, DOCX, etc.) are explicitly **not** ignored — `isDocu
 
 | File | What it tests |
 |---|---|
-| `AppIntegrationTest.java` | End-to-end integration: all three modes (web excluded — needs network), text and JSON output, all match modes, `--max-bytes`, `--max-hits`, Windows line endings, multiple matches per line |
+| `AppIntegrationTest.java` | End-to-end integration: all three modes (web excluded  -  needs network), text and JSON output, all match modes, `--max-bytes`, `--max-hits`, Windows line endings, multiple matches per line |
 | `ContentExtractorTest.java` | HTML text extraction, Tika binary extraction, link extraction, edge cases |
 | `MainTest.java` | `UrlUtils` (normalizeUrl, isIgnoredLink), `MatchEngine` (countMatches, superSimplify, findSnippets), `CrawlResult` accumulation, `Main.findLineMatches` (page detection, truncation, multi-match lines), `CliOptions` parsing and validation edge cases |
 | `ReportWriterTest.java` | JSON escaping, duration formatting, blocked URL grouping, stopped-early output |
 | `UrlDeduplicatorTest.java` | Dedup rules: superset detection, `--all-urls` mode, scheme normalisation, no-params base path handling |
 
-All tests use JUnit 4. There are no mocks — `AppIntegrationTest` writes real temp files and calls `Main.main()` directly with stdout redirected to a `ByteArrayOutputStream` for assertions.
+All tests use JUnit 4. There are no mocks  -  `AppIntegrationTest` writes real temp files and calls `Main.main()` directly with stdout redirected to a `ByteArrayOutputStream` for assertions.
 
 ---
 
@@ -925,7 +925,7 @@ All tests use JUnit 4. There are no mocks — `AppIntegrationTest` writes real t
 - Java 17 source and target.
 - `maven-shade-plugin` creates a fat JAR (`WebGrep-{version}.jar`) containing all dependencies.
 - The `ServicesResourceTransformer` merges `META-INF/services/` files so Tika's format-detection plugins (registered via SPI) are all preserved in the shaded JAR.
-- Signature files (`.SF`, `.DSA`, `.RSA`) are excluded — they become invalid after shading and would cause JAR verification failures.
+- Signature files (`.SF`, `.DSA`, `.RSA`) are excluded  -  they become invalid after shading and would cause JAR verification failures.
 
 **Dockerfile:** Multi-stage build.
 - Stage 1: Maven on `eclipse-temurin:17` compiles and packages the JAR.

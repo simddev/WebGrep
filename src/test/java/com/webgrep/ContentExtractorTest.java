@@ -55,7 +55,7 @@ public class ContentExtractorTest {
     @Test
     public void testExtractLinksSingleQuotesInRawFallback() {
         // Simulate malformed HTML where Jsoup finds no <a> tags, but raw bytes
-        // contain single-quoted hrefs — the regex fallback must catch them.
+        // contain single-quoted hrefs  -  the regex fallback must catch them.
         String emptyDoc = "<html><body></body></html>";
         String rawWithSingleQuotes =
             "<html><body><a href='http://example.com/single-page'>Link</a>" +
