@@ -13,7 +13,7 @@ WebGrep is a high-performance CLI keyword search tool with three modes: **web cr
 ### Option 1  -  Native JAR (requires Java 17+)
 ```bash
 mvn package
-java -jar target/WebGrep-1.1.5.jar -u https://example.com -k "your keyword"
+java -jar target/WebGrep-1.1.7.jar -u https://example.com -k "your keyword"
 ```
 
 ### Option 2  -  Docker (no Java required)
