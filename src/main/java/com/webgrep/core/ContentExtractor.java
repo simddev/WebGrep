@@ -24,7 +24,7 @@ import com.webgrep.utils.UrlUtils;
  * Extracts searchable text from HTML pages and binary documents.
  *
  * <p>HTML content is extracted via Jsoup (title, body text, and meta description/keywords tags).
- * All other content types  -  PDF, DOCX, ODT, XLSX, EPUB, and 100+ other formats  -  are parsed
+ * All other content types - PDF, DOCX, ODT, XLSX, EPUB, and 100+ other formats - are parsed
  * by Apache Tika. Tika is invoked with a configurable {@code maxStringLength} (derived from
  * {@code --max-bytes}) and wrapped in a 30-second timeout to prevent hangs on corrupt files.
  *

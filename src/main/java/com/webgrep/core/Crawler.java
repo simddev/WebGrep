@@ -37,8 +37,8 @@ import java.util.stream.Collectors;
  * <h2>Link classification</h2>
  * <p>Links discovered on each page are split into two categories:
  * <ul>
- *   <li><b>Navigation links</b>  -  HTML pages; only enqueued when within the depth limit.</li>
- *   <li><b>Document links</b>  -  URLs ending in known document extensions (PDF, DOCX, etc.);
+ *   <li><b>Navigation links</b> - HTML pages; only enqueued when within the depth limit.</li>
+ *   <li><b>Document links</b> - URLs ending in known document extensions (PDF, DOCX, etc.);
  *       always enqueued regardless of depth, since documents are leaf nodes that do not
  *       expand the crawl frontier exponentially.</li>
  * </ul>
@@ -54,10 +54,10 @@ public class Crawler {
     /** Maximum number of retry attempts for a single URL on HTTP 429 (rate limit) responses. */
     private static final int MAX_RETRIES = 3;
 
-    /** HTTP status code for Forbidden  -  triggers a blocked entry, not a retry. */
+    /** HTTP status code for Forbidden - triggers a blocked entry, not a retry. */
     private static final int HTTP_FORBIDDEN = 403;
 
-    /** HTTP status code for Too Many Requests  -  triggers exponential-backoff retries. */
+    /** HTTP status code for Too Many Requests - triggers exponential-backoff retries. */
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
 
     /** Index into {@link #SPINNER}; incremented after each page to advance the animation. */
@@ -182,11 +182,11 @@ public class Crawler {
     private boolean isSameDomain(String linkHost) {
         String h = linkHost.toLowerCase();
         if (allowSubdomains) {
-            // Seed had www. (e.g. www.wikipedia.org)  -  allow all subdomains of the root domain
+            // Seed had www. (e.g. www.wikipedia.org) - allow all subdomains of the root domain
             // so en.wikipedia.org, de.wikipedia.org etc. are all followed.
             return h.equals(startDomain) || h.endsWith("." + startDomain);
         }
-        // Seed had no www.  -  only allow the exact domain and its www. alias.
+        // Seed had no www. - only allow the exact domain and its www. alias.
         return h.equals(startDomain) || h.equals("www." + startDomain);
     }
 
@@ -270,7 +270,7 @@ public class Crawler {
                     String contentType = response.contentType();
                     String content;
                     // navLinks respect the depth limit; docLinksToEnqueue bypass it because
-                    // documents are leaves  -  they don't spawn further crawl levels.
+                    // documents are leaves - they don't spawn further crawl levels.
                     List<String> navLinks = new ArrayList<>();
                     List<String> docLinksToEnqueue = new ArrayList<>();
 
@@ -337,7 +337,7 @@ public class Crawler {
                     }
 
                     // Enqueue document links regardless of depth (documents are search targets,
-                    // not new crawl levels  -  they don't multiply the frontier exponentially).
+                    // not new crawl levels - they don't multiply the frontier exponentially).
                     for (String docLink : docLinksToEnqueue) {
                         if (!options.isAllowExternal()) {
                             if (!isSameDomain(extractHost(docLink))) continue;
@@ -437,7 +437,7 @@ public class Crawler {
             if (status == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
                 long waitMs = parseRetryAfter(response.header("Retry-After"), 1000L << attempt);
                 System.err.printf("\r%-110s",
-                        "  ⏸  Rate limited  -  waiting " + (waitMs / 1000) + "s before retry "
+                        "  ⏸  Rate limited - waiting " + (waitMs / 1000) + "s before retry "
                         + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + url);
                 Thread.sleep(waitMs);
             } else if (status >= 400) {
@@ -493,7 +493,7 @@ public class Crawler {
             sc.init(null, trustAllCerts, new SecureRandom());
             return sc.getSocketFactory();
         } catch (Exception e) {
-            System.err.println("Warning: failed to configure insecure SSL  -  " + e.getMessage());
+            System.err.println("Warning: failed to configure insecure SSL - " + e.getMessage());
             return null;
         }
     }
@@ -502,7 +502,7 @@ public class Crawler {
      * Prompts the user interactively to confirm whether they want SPA (headless browser)
      * rendering for the current session.
      *
-     * <p>In non-interactive mode ({@code System.console() == null}  -  piped output, CI,
+     * <p>In non-interactive mode ({@code System.console() == null} - piped output, CI,
      * Docker), the prompt is skipped and {@code true} is returned automatically. If no browser
      * is available in that case, {@link PlaywrightRenderer} will report its own warning and
      * mark itself unavailable.
@@ -519,7 +519,7 @@ public class Crawler {
             // Non-interactive session: proceed silently. If a system browser or
             // Playwright-cached browser is available no download will happen.
             // If no browser is found, PlaywrightRenderer will refuse to download
-            // without a TTY and mark itself unavailable  -  SPA pages will be skipped.
+            // without a TTY and mark itself unavailable - SPA pages will be skipped.
             return true;
         }
 
@@ -539,7 +539,7 @@ public class Crawler {
             String line = console.readLine();
             if (line != null && line.trim().equalsIgnoreCase("n")) {
                 System.err.println();
-                System.err.println("  JavaScript rendering disabled  -  SPA pages will return no content.");
+                System.err.println("  JavaScript rendering disabled - SPA pages will return no content.");
                 System.err.println();
                 return false;
             }

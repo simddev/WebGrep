@@ -11,9 +11,9 @@ import java.util.Map;
  *
  * <p>Supports three output modes, each with two format variants:
  * <ul>
- *   <li><b>Web crawl</b>  -  {@link #printTextOutput} / {@link #printJsonOutput}</li>
- *   <li><b>Single file</b>  -  {@link #printFileTextOutput} / {@link #printFileJsonOutput}</li>
- *   <li><b>Folder scan</b>  -  {@link #printFolderTextOutput} / {@link #printFolderJsonOutput}</li>
+ *   <li><b>Web crawl</b> - {@link #printTextOutput} / {@link #printJsonOutput}</li>
+ *   <li><b>Single file</b> - {@link #printFileTextOutput} / {@link #printFileJsonOutput}</li>
+ *   <li><b>Folder scan</b> - {@link #printFolderTextOutput} / {@link #printFolderJsonOutput}</li>
  * </ul>
  *
  * <p>Text output is formatted for direct human reading; JSON output is minified by field
@@ -97,7 +97,7 @@ public class ReportWriter {
         }
 
         if (crawlResult.stoppedAtMaxHits > 0) {
-            System.out.println("\nNote: Search stopped early  -  max-hits limit of "
+            System.out.println("\nNote: Search stopped early - max-hits limit of "
                     + crawlResult.stoppedAtMaxHits + " reached.");
         }
     }
@@ -217,7 +217,7 @@ public class ReportWriter {
         System.out.println("Total matches found: " + totalMatches);
 
         if (stoppedAtMaxHits > 0) {
-            System.out.println("\nNote: Search stopped early  -  max-hits limit of "
+            System.out.println("\nNote: Search stopped early - max-hits limit of "
                     + stoppedAtMaxHits + " reached.");
         }
 

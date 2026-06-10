@@ -185,7 +185,7 @@ public class AppIntegrationTest {
         assertTrue(output.contains("alpha.txt"));
         assertTrue(output.contains("l.2"));
         assertTrue(output.contains("l.3"));
-        assertFalse("beta.txt has no matches  -  must not appear", output.contains("beta.txt"));
+        assertFalse("beta.txt has no matches - must not appear", output.contains("beta.txt"));
     }
 
     @Test
@@ -259,7 +259,7 @@ public class AppIntegrationTest {
         Files.write(tmp.toPath(), "fox fox fox fox fox fox fox".getBytes());
 
         Main.main(new String[]{"-f", tmp.getAbsolutePath(), "-k", "fox", "-b", "5"});
-        // File exceeds limit  -  skipped with warning to stderr; stdout reports 0 matches
+        // File exceeds limit - skipped with warning to stderr; stdout reports 0 matches
         assertTrue(out().contains("Total matches found: 0"));
     }
 

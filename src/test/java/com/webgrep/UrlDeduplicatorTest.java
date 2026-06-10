@@ -161,7 +161,7 @@ public class UrlDeduplicatorTest {
         d.markQueued("http://example.com/b");
         assertEquals(2, d.size());
 
-        // Marking a dup (same URL) shouldn't increase size  -  but isDuplicate should have returned true;
+        // Marking a dup (same URL) shouldn't increase size - but isDuplicate should have returned true;
         // markQueued of the same URL does add it to queued (no-op since it's a Set), so size stays 2
         d.markQueued("http://example.com/a");
         assertEquals(2, d.size());
@@ -171,7 +171,7 @@ public class UrlDeduplicatorTest {
 
     @Test
     public void testEmptyQueryString() {
-        // URL ending in ? with no actual params  -  treated as having canonical {""};
+        // URL ending in ? with no actual params - treated as having canonical {""};
         // the exact URL is still tracked and deduped on re-encounter
         UrlDeduplicator d = new UrlDeduplicator(false);
         String url = "http://example.com/page?";

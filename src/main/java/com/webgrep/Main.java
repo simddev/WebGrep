@@ -19,14 +19,14 @@ import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
- * WebGrep  -  Keyword search across websites, local files, and folders.
+ * WebGrep - Keyword search across websites, local files, and folders.
  *
  * <p>Entry point for the application. Parses command-line arguments via {@link CliOptions},
  * then routes execution to one of three modes:
  * <ul>
- *   <li><b>Web crawl</b>  -  {@link Crawler} fetches pages and documents starting from a seed URL.</li>
- *   <li><b>Local file</b>  -  {@link #scanLocalFile} reads and searches a single file on disk.</li>
- *   <li><b>Local folder</b>  -  {@link #scanFolder} recursively searches all files in a directory.</li>
+ *   <li><b>Web crawl</b> - {@link Crawler} fetches pages and documents starting from a seed URL.</li>
+ *   <li><b>Local file</b> - {@link #scanLocalFile} reads and searches a single file on disk.</li>
+ *   <li><b>Local folder</b> - {@link #scanFolder} recursively searches all files in a directory.</li>
  * </ul>
  *
  * <p>All three modes share {@link ContentExtractor} (for text extraction) and {@link MatchEngine}
@@ -109,11 +109,11 @@ public class Main {
             System.exit(1);
         } catch (Exception e) {
             System.err.println("Fatal Error: " + e.getClass().getSimpleName()
-                    + (e.getMessage() != null ? "  -  " + e.getMessage() : ""));
+                    + (e.getMessage() != null ? " - " + e.getMessage() : ""));
             Throwable cause = e.getCause();
             while (cause != null) {
                 System.err.println("  Caused by: " + cause.getClass().getSimpleName()
-                        + (cause.getMessage() != null ? "  -  " + cause.getMessage() : ""));
+                        + (cause.getMessage() != null ? " - " + cause.getMessage() : ""));
                 cause = cause.getCause();
             }
             System.exit(2);
@@ -277,10 +277,10 @@ public class Main {
      *
      * <p>Checks for a usable browser in the following order, skipping download if one is found:
      * <ol>
-     *   <li>System Chromium/Chrome  -  always reliable (speaks CDP natively).</li>
-     *   <li>Playwright's cached Firefox  -  previously downloaded, always compatible.</li>
-     *   <li>Playwright's cached Chromium  -  previously downloaded, always compatible.</li>
-     *   <li>System Firefox stable  -  trusted unless the path indicates Developer Edition
+     *   <li>System Chromium/Chrome - always reliable (speaks CDP natively).</li>
+     *   <li>Playwright's cached Firefox - previously downloaded, always compatible.</li>
+     *   <li>Playwright's cached Chromium - previously downloaded, always compatible.</li>
+     *   <li>System Firefox stable - trusted unless the path indicates Developer Edition
      *       (hyphen-separated on Linux, space-separated on macOS/Windows) or Nightly, which
      *       are incompatible with Playwright's patched protocol.</li>
      * </ol>
@@ -294,11 +294,11 @@ public class Main {
     private static void installBrowser(CliOptions options) throws Exception {
         String pref = options.getBrowser(); // "auto", "firefox", or "chromium"
 
-        // Chromium/Chrome speaks CDP natively  -  always compatible with Playwright.
+        // Chromium/Chrome speaks CDP natively - always compatible with Playwright.
         java.util.Optional<java.nio.file.Path> sysChr = com.webgrep.core.BrowserFinder.findChromium();
         if (sysChr.isPresent() && !pref.equals("firefox")) {
             System.out.println("System Chromium/Chrome already available at: " + sysChr.get());
-            System.out.println("WebGrep will use it automatically  -  no installation needed.");
+            System.out.println("WebGrep will use it automatically - no installation needed.");
             return;
         }
 
@@ -307,12 +307,12 @@ public class Main {
                 System.getProperty("user.home"), ".cache", "ms-playwright");
         if (!pref.equals("chromium") && isCachedBrowser(pwCache, "firefox-")) {
             System.out.println("Playwright Firefox is already installed in the cache.");
-            System.out.println("WebGrep will use it automatically  -  no installation needed.");
+            System.out.println("WebGrep will use it automatically - no installation needed.");
             return;
         }
         if (!pref.equals("firefox") && isCachedBrowser(pwCache, "chromium-")) {
             System.out.println("Playwright Chromium is already installed in the cache.");
-            System.out.println("WebGrep will use it automatically  -  no installation needed.");
+            System.out.println("WebGrep will use it automatically - no installation needed.");
             return;
         }
 
@@ -327,7 +327,7 @@ public class Main {
                     || p.contains("nightly");
             if (!incompatible) {
                 System.out.println("System Firefox already available at: " + sysFf.get());
-                System.out.println("WebGrep will use it automatically  -  no installation needed.");
+                System.out.println("WebGrep will use it automatically - no installation needed.");
                 return;
             }
         }

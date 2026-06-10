@@ -13,12 +13,12 @@ import java.util.regex.Pattern;
  * Counts keyword occurrences in a string using one of three pluggable matching strategies.
  *
  * <ul>
- *   <li><b>default</b>  -  Case-insensitive with Unicode and diacritic support. {@code cafe}
+ *   <li><b>default</b> - Case-insensitive with Unicode and diacritic support. {@code cafe}
  *       matches {@code Café}, {@code CAFE}, {@code café}. If no match is found via regex, a
  *       simplified (diacritic-stripped, punctuation-removed) fallback pass is attempted.</li>
- *   <li><b>exact</b>  -  Strict case-sensitive literal match. {@code hello} does not match
+ *   <li><b>exact</b> - Strict case-sensitive literal match. {@code hello} does not match
  *       {@code Hello}.</li>
- *   <li><b>fuzzy</b>  -  First tries a normalised substring match; if that fails, splits the
+ *   <li><b>fuzzy</b> - First tries a normalised substring match; if that fails, splits the
  *       text into words and accepts any word within Levenshtein edit distance 1 (for keywords
  *       ≤ 4 characters) or 2 (longer keywords). Catches common typos and spelling variants.</li>
  * </ul>
@@ -99,7 +99,7 @@ public class MatchEngine {
             }
 
             // Skip the simplified pass when the keyword contains ASCII special characters
-            // (e.g. "more*", "node.js", ".NET")  -  stripping them would change the intended
+            // (e.g. "more*", "node.js", ".NET") - stripping them would change the intended
             // search term and produce false positives. The pass is safe when the only
             // non-alphanumeric characters are Unicode diacritics (e.g. "café" → "cafe").
             // Guard is evaluated before superSimplify(text) to avoid a wasted NFD pass over
@@ -140,7 +140,7 @@ public class MatchEngine {
      * For example, searching {@code "Tomas"} will highlight {@code "Tomáš"} in its original form.
      * Running the simplified pass alongside the regex pass (not only as a fallback) ensures that
      * text containing both a plain variant ({@code "cafe"}) and an accented variant ({@code "Café"})
-     * produces a snippet for each  -  consistent with {@link #countMatches} which always runs both
+     * produces a snippet for each - consistent with {@link #countMatches} which always runs both
      * passes. In default mode the simplified pass is still skipped when the keyword contains ASCII
      * special characters (e.g. {@code "node.js"}) to avoid false positives; in fuzzy mode it is
      * always allowed because fuzzy matching intentionally strips punctuation.
@@ -155,7 +155,7 @@ public class MatchEngine {
         if (text == null || text.isEmpty() || keyword == null || keyword.isEmpty()) return List.of();
 
         // Flatten whitespace so snippets read cleanly as a single line.
-        // U+00A0 (non-breaking space) is normalised here too  -  SPA pages deliver it via
+        // U+00A0 (non-breaking space) is normalised here too - SPA pages deliver it via
         // textContent and it would otherwise survive into snippet text invisibly.
         String flat = text.replaceAll("[\r\n\t ]+", " ").replaceAll(" {2,}", " ").trim();
 
@@ -174,12 +174,12 @@ public class MatchEngine {
         // Builds a per-character position map from simplified text back to flat so snippet boundaries
         // are accurate in the original string. Runs alongside the regex pass (not as a fallback) so
         // that text with both plain and accented variants (e.g. "cafe Café") produces snippets for
-        // each  -  consistent with countMatches, which always runs both passes. The seen set prevents
+        // each - consistent with countMatches, which always runs both passes. The seen set prevents
         // duplicates when simplified finds the same position as regex.
         //
         // Guard logic:
         //  - Skipped in exact mode (user wants a literal match).
-        //  - Skipped when results are already at capacity (results.size() >= maxSnippets)  -  avoids
+        //  - Skipped when results are already at capacity (results.size() >= maxSnippets) - avoids
         //    the expensive simpleBuf/origPos build when no more snippets can be added.
         //  - In default mode: skipped when the keyword contains ASCII special characters
         //    (e.g. "more*", "node.js") because stripping them changes the intended search term.
@@ -292,7 +292,7 @@ public class MatchEngine {
 
     /**
      * Returns {@code true} if {@code keyword} contains any ASCII character that is not a letter,
-     * digit, or space  -  for example {@code '*'}, {@code '.'}, {@code '+'}, {@code '#'}.
+     * digit, or space - for example {@code '*'}, {@code '.'}, {@code '+'}, {@code '#'}.
      *
      * <p>Used to gate the simplified (diacritic-stripping) pass in default mode: stripping such
      * characters from the keyword before matching would change its meaning and produce false

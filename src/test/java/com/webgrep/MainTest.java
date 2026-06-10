@@ -65,7 +65,7 @@ public class MainTest {
     @Test
     public void testMatchEngineSingleCharFallbackSuppressed() {
         MatchEngine engine = new MatchEngine();
-        // "(C)" strips to "c" and "C++" strips to "c"  -  a 1-char fallback must not
+        // "(C)" strips to "c" and "C++" strips to "c" - a 1-char fallback must not
         // match every line in a document; it should return 0 when the literal is absent.
         assertEquals(0, engine.countMatches("GNU GENERAL PUBLIC LICENSE", "(C)", "default"));
         assertEquals(0, engine.countMatches("Use the GNU General Public License", "C++", "default"));
@@ -342,7 +342,7 @@ public class MainTest {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // findLineMatches  -  edge cases
+    // findLineMatches - edge cases
     // ────────────────────────────────────────────────────────────────
 
     @Test
@@ -508,7 +508,7 @@ public class MainTest {
     @Test
     public void testFindLineMatchesSnippetAt121IsTruncatedTo120() {
         MatchEngine engine = new MatchEngine();
-        String line = "fox " + "x".repeat(117); // 121 chars  -  must truncate
+        String line = "fox " + "x".repeat(117); // 121 chars - must truncate
         List<FileMatch> matches = Main.findLineMatches(line, "fox", "default", engine);
         assertEquals(1, matches.size());
         assertEquals(120, matches.get(0).snippet().length());
@@ -526,7 +526,7 @@ public class MainTest {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CliOptions  -  --file flag, regressions
+    // CliOptions - --file flag, regressions
     // ────────────────────────────────────────────────────────────────
 
     @Test
@@ -582,7 +582,7 @@ public class MainTest {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CliOptions  -  --folder flag
+    // CliOptions - --folder flag
     // ────────────────────────────────────────────────────────────────
 
     @Test
@@ -657,7 +657,7 @@ public class MainTest {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CliOptions  -  unknown flag rejection
+    // CliOptions - unknown flag rejection
     // ────────────────────────────────────────────────────────────────
 
     @Test(expected = IllegalArgumentException.class)
@@ -687,7 +687,7 @@ public class MainTest {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CliOptions  -  --browser flag
+    // CliOptions - --browser flag
     // ────────────────────────────────────────────────────────────────
 
     @Test
@@ -753,7 +753,7 @@ public class MainTest {
 
     @Test
     public void testAddMatchAccumulatesAcrossVisits() {
-        // v1.1.3: addMatch must use merge, not put  -  second call must add to existing count
+        // v1.1.3: addMatch must use merge, not put - second call must add to existing count
         CrawlResult result = new CrawlResult();
         result.addMatch("http://example.com/page", 3);
         result.addMatch("http://example.com/page", 2);
@@ -799,7 +799,7 @@ public class MainTest {
         try {
             java.nio.file.Path real = tmp.resolve("real.txt");
             java.nio.file.Files.writeString(real, "keyword found here");
-            // Symlink pointing at the real file  -  should NOT be scanned as a second copy
+            // Symlink pointing at the real file - should NOT be scanned as a second copy
             java.nio.file.Path link = tmp.resolve("link.txt");
             java.nio.file.Files.createSymbolicLink(link, real);
 
@@ -836,7 +836,7 @@ public class MainTest {
         assertEquals(5, result.getTotalMatches());
         result.addMatch("http://a.com/p2", 3);
         assertEquals(8, result.getTotalMatches());
-        // Same URL visited again  -  count accumulates
+        // Same URL visited again - count accumulates
         result.addMatch("http://a.com/p1", 2);
         assertEquals(10, result.getTotalMatches());
     }
