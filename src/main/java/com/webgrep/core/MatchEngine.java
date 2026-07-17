@@ -356,19 +356,22 @@ public class MatchEngine {
 
     /**
      * Same as {@link #superSimplify} but preserves spaces so the result can be split into words.
-     * Used by fuzzy mode to tokenise the text before Levenshtein matching.
+     * Used by fuzzy mode to tokenise the text before Levenshtein matching, and by the default-mode
+     * simplified pass to find diacritic variants without collapsing across word boundaries.
      *
      * <p>Non-alphanumeric, non-space characters are replaced with a space rather than removed,
-     * so word boundaries around punctuation are preserved.
+     * so word boundaries around punctuation are preserved. Any run of whitespace (including tabs
+     * and newlines from Tika-extracted PDF/DOCX content) is collapsed to a single ASCII space so
+     * that multi-word keywords match across line breaks in raw document text.
      *
      * @param input the string to simplify; {@code null} is treated as {@code ""}.
-     * @return the simplified string with spaces preserved; never {@code null}.
+     * @return the simplified string with whitespace collapsed to single spaces; never {@code null}.
      */
     private String simplifyWithSpaces(String input) {
         if (input == null) return "";
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
         normalized = normalized.replaceAll("\\p{M}", "");
-        return normalized.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\s]", " ");
+        return normalized.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ");
     }
 
     /**

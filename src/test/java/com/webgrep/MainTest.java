@@ -933,6 +933,23 @@ public class MainTest {
         assertTrue(engine.countMatches("so far away", "sofa", "fuzzy") > 0);
     }
 
+    // ── multi-word keyword across newline (Tika PDF text) ────────────────────
+
+    @Test
+    public void testMultiWordKeywordMatchesAcrossLineBreak() {
+        MatchEngine engine = new MatchEngine();
+        // Tika-extracted PDF text uses \n for line breaks; a multi-word keyword must still
+        // match even when its constituent words are split across adjacent lines.
+        assertTrue(engine.countMatches("attention\nmechanism of networks", "attention mechanism", "default") > 0);
+    }
+
+    @Test
+    public void testMultiWordSnippetAcrossLineBreak() {
+        MatchEngine engine = new MatchEngine();
+        List<String> snippets = engine.findSnippets("The attention\nmechanism is key.", "attention mechanism", "default", 3);
+        assertFalse(snippets.isEmpty());
+    }
+
     // ── M-4: malformed flag rejection ─────────────────────────────────────────
 
     @Test(expected = IllegalArgumentException.class)
