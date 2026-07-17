@@ -331,7 +331,7 @@ public class Main {
         // incompatible with Playwright's patched protocol and must not be reported as ready.
         java.util.Optional<java.nio.file.Path> sysFf = com.webgrep.core.BrowserFinder.findFirefox();
         if (sysFf.isPresent() && !pref.equals("chromium")) {
-            String p = sysFf.get().toString().toLowerCase();
+            String p = sysFf.get().toString().toLowerCase(java.util.Locale.ROOT);
             // "developer-edition" matches Linux paths; "developer edition" (with space) matches
             // macOS ("Firefox Developer Edition.app") and Windows ("Firefox Developer Edition\").
             boolean incompatible = p.contains("developer-edition") || p.contains("developer edition")

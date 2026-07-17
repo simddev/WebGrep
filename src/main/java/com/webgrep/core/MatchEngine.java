@@ -106,14 +106,18 @@ public class MatchEngine {
             // Guard is evaluated before superSimplify(text) to avoid a wasted NFD pass over
             // potentially large page text when the simplified path will be skipped anyway.
             if (!hasAsciiSpecialChars(keyword)) {
-                String simpleKeyword = superSimplify(keyword);
-                // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
-                // don't degrade to a single letter that matches every word in the text.
+                // Use simplifyWithSpaces for BOTH keyword and text so that:
+                // (a) word boundaries are preserved — "sofa" does not match "so far away"
+                //     because the space prevents a contiguous substring match, and
+                // (b) multi-word keywords with diacritics work — "cafe latte" finds "café latte".
+                // .strip() removes leading/trailing spaces that could arise from non-alphanumeric
+                // chars at the keyword boundaries (e.g. keyword "  café  " → "cafe").
+                String simpleKeyword = simplifyWithSpaces(keyword).strip();
+                // Require at least 2 chars so that keywords like "(C)" or "C++" that reduce to
+                // a single letter don't flood results. (ASCII-special keywords are already
+                // excluded by hasAsciiSpecialChars above; this guard handles the rare case of
+                // a keyword that simplifies to a single alphanumeric char.)
                 if (simpleKeyword.length() >= 2) {
-                    // Use simplifyWithSpaces so that word boundaries are preserved:
-                    // "sofa" must not match "so far away" because the space between "so" and "far"
-                    // prevents a contiguous substring match. superSimplify would strip the space
-                    // and concatenate adjacent words, causing cross-word false positives.
                     String simpleText = simplifyWithSpaces(text);
                     int simpleCount = 0;
                     int idx = 0;
@@ -193,15 +197,17 @@ public class MatchEngine {
         //    "node.js" should find "nodejs" both in count and in snippets.
         boolean keywordHasAsciiSpecial = hasAsciiSpecialChars(keyword);
         if (results.size() < maxSnippets && !mode.equals("exact") && (!keywordHasAsciiSpecial || mode.equals("fuzzy"))) {
-            String simpleKeyword = superSimplify(keyword);
+            // In default mode, preserve spaces so the position map respects word boundaries and
+            // multi-word keywords find diacritic variants (mirrors the countMatches simplified pass).
+            // Fuzzy mode keeps the space-stripping behaviour to match countFuzzyMatches.
+            boolean preserveSpaces = mode.equals("default");
+            String simpleKeyword = preserveSpaces
+                    ? simplifyWithSpaces(keyword).strip()
+                    : superSimplify(keyword);
             if (simpleKeyword.length() >= 2) {
                 StringBuilder simpleBuf = new StringBuilder(flat.length());
                 int[] origPos = new int[flat.length() * 2 + 1]; // *2 for rare ligature decomposition
                 int sLen = 0;
-                // In default mode, preserve spaces so the position map respects word boundaries:
-                // "sofa" must not find a snippet in "so far away" (same reason as in countMatches).
-                // Fuzzy mode keeps the space-stripping behaviour to match countFuzzyMatches.
-                boolean preserveSpaces = mode.equals("default");
                 for (int ci = 0; ci < flat.length(); ci++) {
                     char c = flat.charAt(ci);
                     if (c < 128) {

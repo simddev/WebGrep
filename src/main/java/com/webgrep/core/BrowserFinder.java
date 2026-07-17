@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -55,7 +56,7 @@ public class BrowserFinder {
      * @return an ordered list of candidate paths; paths that do not exist on disk are harmless.
      */
     private static List<Path> knownChromiumPaths() {
-        String os = System.getProperty("os.name", "").toLowerCase();
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
 
         if (os.contains("mac")) {
             return List.of(
@@ -122,7 +123,7 @@ public class BrowserFinder {
      * @return an ordered list of candidate paths; paths that do not exist on disk are harmless.
      */
     private static List<Path> knownFirefoxPaths() {
-        String os = System.getProperty("os.name", "").toLowerCase();
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
 
         if (os.contains("mac")) {
             return List.of(
@@ -172,7 +173,7 @@ public class BrowserFinder {
      *         or {@code Optional.empty()} if none were found.
      */
     private static Optional<Path> findViaShell(String... names) {
-        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
         String cmd = isWindows ? "where" : "which";
         for (String name : names) {
             try {

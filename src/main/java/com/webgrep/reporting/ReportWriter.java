@@ -4,6 +4,7 @@ import com.webgrep.config.CliOptions;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -132,7 +133,7 @@ public class ReportWriter {
         json.append("    \"errors\": {\n");
         CrawlResult.ErrorType[] types = CrawlResult.ErrorType.values();
         for (int i = 0; i < types.length; i++) {
-            json.append("      \"").append(types[i].name().toLowerCase()).append("\": ").append(crawlResult.errorCounts.get(types[i]));
+            json.append("      \"").append(types[i].name().toLowerCase(Locale.ROOT)).append("\": ").append(crawlResult.errorCounts.get(types[i]));
             if (i < types.length - 1 || !crawlResult.networkErrorReasons.isEmpty()) json.append(",");
             json.append("\n");
         }
