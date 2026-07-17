@@ -1,6 +1,8 @@
 package com.webgrep.config;
 
+import com.webgrep.utils.UrlUtils;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -128,6 +130,18 @@ public class CliOptions {
                 if (key == null)
                     throw new IllegalArgumentException("Unknown option: -" + shortFlag);
                 hasValue = isValuedFlag(key);
+            } else if (arg.startsWith("-")) {
+                // Multi-character single-dash tokens like -url or -ke are not valid.
+                // Long flags require double dashes (--url) and short flags take a single char (-u).
+                throw new IllegalArgumentException(
+                        "Unrecognised option: " + arg + ". Long flags use -- (e.g. --keyword); "
+                        + "short flags use a single character (e.g. -k).");
+            } else {
+                // Bare positional arguments have no meaning in WebGrep; the user likely
+                // forgot a flag prefix (e.g. typed a keyword without -k).
+                throw new IllegalArgumentException(
+                        "Unexpected argument: " + arg + ". All values must follow a flag "
+                        + "(e.g. -k \"" + arg + "\" to search for this keyword).");
             }
 
             if (key != null) {
@@ -150,7 +164,7 @@ public class CliOptions {
         }
 
         // Parse --browser before any early-return so it's available alongside --install-browser.
-        options.browser = params.getOrDefault("browser", "auto").toLowerCase();
+        options.browser = params.getOrDefault("browser", "auto").toLowerCase(Locale.ROOT);
         if (!options.browser.equals("auto") && !options.browser.equals("firefox") && !options.browser.equals("chromium"))
             throw new IllegalArgumentException("Invalid browser: " + options.browser + ". Use auto, firefox, or chromium.");
 
@@ -175,12 +189,12 @@ public class CliOptions {
             throw new IllegalArgumentException("Invalid numeric value in arguments: " + e.getMessage());
         }
 
-        options.mode = params.getOrDefault("mode", "default").toLowerCase();
+        options.mode = params.getOrDefault("mode", "default").toLowerCase(Locale.ROOT);
         options.allowExternal = params.containsKey("allow-external");
         options.insecure = params.containsKey("insecure");
         options.allUrls = params.containsKey("all-urls");
         options.dfs = params.containsKey("dfs");
-        options.output = params.getOrDefault("output", "text").toLowerCase();
+        options.output = params.getOrDefault("output", "text").toLowerCase(Locale.ROOT);
 
         return options;
     }
@@ -263,12 +277,15 @@ public class CliOptions {
             if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")
                     && !url.startsWith("http://") && !url.startsWith("https://"))
                 throw new IllegalArgumentException("URL scheme must be http or https");
+            // Reject URLs that produce no usable host after normalisation (e.g. "http://", "https://").
+            if (UrlUtils.normalizeUrl(url, null).isEmpty())
+                throw new IllegalArgumentException("Invalid URL (no host): " + url);
         }
         if (keyword == null || keyword.isBlank()) throw new IllegalArgumentException("Keyword is required (-k, --keyword)");
         if (depth < 0) throw new IllegalArgumentException("Depth must be non-negative");
         if (maxPages <= 0) throw new IllegalArgumentException("Max pages must be greater than zero");
         if (maxBytes <= 0) throw new IllegalArgumentException("Max bytes must be greater than zero");
-        if (timeoutMs < 0) throw new IllegalArgumentException("Timeout must be non-negative");
+        if (timeoutMs <= 0) throw new IllegalArgumentException("Timeout must be greater than zero");
         if (delayMs < 0) throw new IllegalArgumentException("Delay must be non-negative");
         if (maxHits < 0) throw new IllegalArgumentException("Max hits must be non-negative (0 = no limit)");
         if (!mode.equals("default") && !mode.equals("exact") && !mode.equals("fuzzy")) {

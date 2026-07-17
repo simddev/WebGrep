@@ -11,10 +11,12 @@ import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -140,7 +142,10 @@ public class Crawler {
         boolean seedHasWww = startHost.startsWith("www.");
         this.startDomain = seedHasWww ? startHost.substring(4) : startHost;
         this.allowSubdomains = seedHasWww;
-        this.maxBodySize = (int) Math.min(options.getMaxBytes(), Integer.MAX_VALUE);
+        // Set Jsoup's cap one byte above the user limit so that a body truncated at exactly
+        // maxBytes bytes is distinguishable from a legitimate response of that exact size.
+        // The body-length check below uses > maxBytes (not >= maxBodySize) to detect truncation.
+        this.maxBodySize = (int) Math.min(options.getMaxBytes() + 1L, Integer.MAX_VALUE);
         this.dedup = new UrlDeduplicator(options.isAllUrls());
 
         if (options.isInsecure()) {
@@ -163,7 +168,7 @@ public class Crawler {
      */
     private String extractHost(String url) {
         try {
-            return new URL(url).getHost().toLowerCase();
+            return new URL(url).getHost().toLowerCase(Locale.ROOT);
         } catch (Exception e) {
             return "";
         }
@@ -180,7 +185,7 @@ public class Crawler {
      * @return {@code true} if the link is within scope and should be followed.
      */
     private boolean isSameDomain(String linkHost) {
-        String h = linkHost.toLowerCase();
+        String h = linkHost.toLowerCase(Locale.ROOT);
         if (allowSubdomains) {
             // Seed had www. (e.g. www.wikipedia.org) - allow all subdomains of the root domain
             // so en.wikipedia.org, de.wikipedia.org etc. are all followed.
@@ -231,11 +236,18 @@ public class Crawler {
 
                     org.jsoup.Connection.Response response = fetchWithRetry(current.url);
                     storeCookies(response.url().toString(), response.cookies());
-                    // Use the final URL after redirects as the canonical URL for this page
-                    String effectiveUrl = response.url().toString();
-                    // If the server redirected us, mark the effective URL as queued so that
-                    // any other page linking directly to it is not visited a second time.
+                    // Use the final URL after redirects as the canonical URL for this page.
+                    // Normalise it so the dedup check below compares on the same canonical form.
+                    String rawEffective = response.url().toString();
+                    String normalized = UrlUtils.normalizeUrl(rawEffective, null);
+                    String effectiveUrl = normalized.isEmpty() ? rawEffective : normalized;
                     if (!effectiveUrl.equals(current.url)) {
+                        // Two queued URLs may redirect to the same target; skip content processing
+                        // for the second arrival so matches are not double-counted.
+                        if (dedup.isDuplicate(effectiveUrl)) {
+                            crawlResult.visitedCount++;
+                            continue;
+                        }
                         dedup.markQueued(effectiveUrl);
                     }
 
@@ -262,6 +274,8 @@ public class Crawler {
                     }
 
                     byte[] body = response.bodyAsBytes();
+                    // body.length can exceed maxBytes because Jsoup's download cap is maxBytes+1;
+                    // a body of exactly maxBodySize bytes means Jsoup truncated the response.
                     if (body.length > options.getMaxBytes()) {
                         crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
                         continue;
@@ -435,6 +449,9 @@ public class Crawler {
             int status = response.statusCode();
 
             if (status == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
+                // Store any cookies the server sent on the 429 (some challenge flows set
+                // a session cookie that must be echoed back on the retry request).
+                storeCookies(url, response.cookies());
                 long waitMs = parseRetryAfter(response.header("Retry-After"), 1000L << attempt);
                 System.err.printf("\r%-110s",
                         "  ⏸  Rate limited - waiting " + (waitMs / 1000) + "s before retry "
@@ -465,7 +482,7 @@ public class Crawler {
     private static long parseRetryAfter(String header, long defaultMs) {
         if (header != null && !header.isBlank()) {
             try {
-                return Math.min(Long.parseLong(header.trim()) * 1000L, 60_000L);
+                return Math.max(0L, Math.min(Long.parseLong(header.trim()) * 1000L, 60_000L));
             } catch (NumberFormatException ignored) {}
         }
         return defaultMs;
@@ -558,7 +575,20 @@ public class Crawler {
      * @return the cookie map for that host; never {@code null}.
      */
     private Map<String, String> cookiesFor(String url) {
-        return cookieJar.getOrDefault(extractHost(url), Map.of());
+        String host = extractHost(url);
+        if (!allowSubdomains || cookieJar.size() <= 1) {
+            return cookieJar.getOrDefault(host, Map.of());
+        }
+        // When crawling subdomains (seed was www.*), merge cookies from all hosts under
+        // the same root domain so session tokens set on one subdomain are sent to others.
+        Map<String, String> merged = new HashMap<>();
+        cookieJar.forEach((h, jar) -> {
+            if (h.equals(startDomain) || h.endsWith("." + startDomain)) merged.putAll(jar);
+        });
+        // Host-specific cookies win over broader domain cookies.
+        Map<String, String> hostJar = cookieJar.get(host);
+        if (hostJar != null) merged.putAll(hostJar);
+        return merged.isEmpty() ? Map.of() : Collections.unmodifiableMap(merged);
     }
 
     /**

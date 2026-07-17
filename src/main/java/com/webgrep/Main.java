@@ -10,8 +10,12 @@ import com.webgrep.reporting.FileScanResult;
 import com.webgrep.reporting.ReportWriter;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -159,12 +163,20 @@ public class Main {
         if (!dir.exists() || !dir.isDirectory())
             throw new IllegalArgumentException("Folder not found: " + options.getFolder());
 
-        List<Path> files;
-        try (var stream = Files.walk(dir.toPath())) {
-            files = stream
-                    .filter(p -> Files.isRegularFile(p) && !Files.isSymbolicLink(p))
-                    .sorted().toList();
-        }
+        // walkFileTree continues past unreadable subdirectories instead of aborting the scan.
+        List<Path> files = new ArrayList<>();
+        Files.walkFileTree(dir.toPath(), new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path f, BasicFileAttributes a) {
+                if (!Files.isSymbolicLink(f)) files.add(f);
+                return FileVisitResult.CONTINUE;
+            }
+            @Override
+            public FileVisitResult visitFileFailed(Path f, IOException e) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        files.sort(null);
 
         List<FileScanResult> results = new ArrayList<>();
         int scanned = 0, skipped = 0, failed = 0, totalMatches = 0;
@@ -263,7 +275,7 @@ public class Main {
             for (int l = 0; l < lines.length; l++) {
                 int count = matchEngine.countMatches(lines[l], keyword, mode);
                 if (count > 0) {
-                    String snippet = lines[l].trim();
+                    String snippet = lines[l].trim().replaceAll("[\\x00-\\x1F\\x7F]", "");
                     if (snippet.length() > 120) snippet = snippet.substring(0, 117) + "...";
                     matches.add(new FileMatch(hasPages ? p + 1 : 0, l + 1, count, snippet));
                 }
@@ -303,8 +315,7 @@ public class Main {
         }
 
         // Playwright's own cached builds are always compatible.
-        java.nio.file.Path pwCache = java.nio.file.Paths.get(
-                System.getProperty("user.home"), ".cache", "ms-playwright");
+        java.nio.file.Path pwCache = com.webgrep.core.PlaywrightRenderer.playwrightCachePath();
         if (!pref.equals("chromium") && isCachedBrowser(pwCache, "firefox-")) {
             System.out.println("Playwright Firefox is already installed in the cache.");
             System.out.println("WebGrep will use it automatically - no installation needed.");
@@ -349,7 +360,19 @@ public class Main {
 
         String label = toInstall.equals("chromium") ? "Chromium (Google)" : "Firefox (Mozilla)";
         System.out.println("Installing Playwright " + label + "...");
-        com.microsoft.playwright.CLI.main(new String[]{"install", toInstall});
+        // Run the Playwright CLI installer in a subprocess. Calling CLI.main() in-process would
+        // invoke System.exit() on completion, terminating the JVM before we can print "Done.".
+        String javaExe = ProcessHandle.current().info().command().orElse("java");
+        String cp = com.webgrep.core.PlaywrightRenderer.playwrightClasspath();
+        Process proc = new ProcessBuilder(javaExe, "-cp", cp,
+                "com.microsoft.playwright.CLI", "install", toInstall)
+                .inheritIO()
+                .start();
+        int exitCode = proc.waitFor();
+        if (exitCode != 0) {
+            System.err.println("Warning: browser installer exited with code " + exitCode + ".");
+            return;
+        }
         System.out.println("Done. WebGrep will use it automatically for SPA pages.");
     }
 

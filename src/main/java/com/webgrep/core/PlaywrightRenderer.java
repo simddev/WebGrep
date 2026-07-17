@@ -9,11 +9,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -354,11 +356,11 @@ public class PlaywrightRenderer implements AutoCloseable {
             Map<String, String> contextCookies = new HashMap<>();
             if (persistentContext != null) {
                 try {
-                    String pageHost = new URL(url).getHost().toLowerCase();
+                    String pageHost = new URL(url).getHost().toLowerCase(Locale.ROOT);
                     persistentContext.cookies().forEach(c -> {
                         if (c.name == null || c.value == null) return;
                         if (c.domain == null) { contextCookies.put(c.name, c.value); return; }
-                        String d = c.domain.toLowerCase();
+                        String d = c.domain.toLowerCase(Locale.ROOT);
                         if (d.startsWith(".")) d = d.substring(1);
                         if (pageHost.equals(d) || pageHost.endsWith("." + d)) {
                             contextCookies.put(c.name, c.value);
@@ -591,14 +593,17 @@ public class PlaywrightRenderer implements AutoCloseable {
         // CLI.main() calls System.exit() on completion - which would terminate the running crawl.
         // Run the installer in a subprocess so the JVM process survives the download.
         String javaExe = ProcessHandle.current().info().command().orElse("java");
-        String cp = PlaywrightRenderer.class.getProtectionDomain()
-                .getCodeSource().getLocation().getPath();
+        String cp = playwrightClasspath();
         Process proc = new ProcessBuilder(javaExe, "-cp", cp,
                 "com.microsoft.playwright.CLI", "install",
                 isChromium ? "chromium" : "firefox")
                 .inheritIO()
                 .start();
-        proc.waitFor();
+        int exitCode = proc.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("Browser installer exited with code " + exitCode
+                    + ". Run '--install-browser' manually to see the full output.");
+        }
         System.err.println();
 
         initPlaywright();
@@ -643,8 +648,50 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Returns {@code true} if a Playwright-cached Firefox build is present in
-     * {@code ~/.cache/ms-playwright/}.
+     * Returns the OS-appropriate Playwright browser cache directory, respecting the
+     * {@code PLAYWRIGHT_BROWSERS_PATH} environment variable when set.
+     *
+     * <ul>
+     *   <li>Linux: {@code ~/.cache/ms-playwright}</li>
+     *   <li>macOS: {@code ~/Library/Caches/ms-playwright}</li>
+     *   <li>Windows: {@code %LOCALAPPDATA%\ms-playwright}</li>
+     * </ul>
+     */
+    public static Path playwrightCachePath() {
+        String env = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
+        if (env != null && !env.isBlank()) return Paths.get(env);
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (os.contains("win")) {
+            String lad = System.getenv().getOrDefault("LOCALAPPDATA",
+                    System.getProperty("user.home") + "\\AppData\\Local");
+            return Paths.get(lad, "ms-playwright");
+        }
+        if (os.contains("mac")) {
+            return Paths.get(System.getProperty("user.home"), "Library", "Caches", "ms-playwright");
+        }
+        return Paths.get(System.getProperty("user.home"), ".cache", "ms-playwright");
+    }
+
+    /**
+     * Returns the classpath entry (JAR path or classes directory) that contains the Playwright
+     * runtime, for use when spawning a subprocess to run {@code com.microsoft.playwright.CLI}.
+     *
+     * <p>Uses {@link URI} conversion to correctly handle directory paths that contain spaces,
+     * unlike the URL-encoded string returned by {@link java.net.URL#getPath()}.
+     */
+    public static String playwrightClasspath() {
+        try {
+            URI loc = PlaywrightRenderer.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI();
+            return Paths.get(loc).toString();
+        } catch (Exception e) {
+            return PlaywrightRenderer.class.getProtectionDomain()
+                    .getCodeSource().getLocation().getPath();
+        }
+    }
+
+    /**
+     * Returns {@code true} if a Playwright-cached Firefox build is present in the cache.
      *
      * @return {@code true} if a directory starting with {@code "firefox-"} exists in the cache.
      */
@@ -653,8 +700,7 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Returns {@code true} if a Playwright-cached Chromium build is present in
-     * {@code ~/.cache/ms-playwright/}.
+     * Returns {@code true} if a Playwright-cached Chromium build is present in the cache.
      *
      * @return {@code true} if a directory starting with {@code "chromium-"} exists in the cache.
      */
@@ -670,7 +716,7 @@ public class PlaywrightRenderer implements AutoCloseable {
      */
     private static boolean isPlaywrightCached(String prefix) {
         try {
-            Path cache = Paths.get(System.getProperty("user.home"), ".cache", "ms-playwright");
+            Path cache = playwrightCachePath();
             if (!Files.isDirectory(cache)) return false;
             try (var entries = Files.list(cache)) {
                 return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
@@ -693,7 +739,7 @@ public class PlaywrightRenderer implements AutoCloseable {
     private void passCookies(BrowserContext context, Map<String, String> cookies, String url) {
         if (cookies.isEmpty()) return;
         try {
-            String domain = new URL(url).getHost().toLowerCase();
+            String domain = new URL(url).getHost().toLowerCase(Locale.ROOT);
             List<Cookie> pwCookies = cookies.entrySet().stream()
                     .map(e -> new Cookie(e.getKey(), e.getValue()).setDomain(domain).setPath("/"))
                     .collect(Collectors.toList());

@@ -1,6 +1,7 @@
 package com.webgrep.utils;
 
 import java.net.URL;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -56,7 +57,7 @@ public class UrlUtils {
         // never reach the fetcher even if they somehow survive as absolute-looking strings.
         if (urlString.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")) {
             int colon = urlString.indexOf(':');
-            String scheme = urlString.substring(0, colon).toLowerCase();
+            String scheme = urlString.substring(0, colon).toLowerCase(Locale.ROOT);
             if (!scheme.equals("http") && !scheme.equals("https")) return "";
         }
         if (!urlString.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*")) {
@@ -76,9 +77,9 @@ public class UrlUtils {
         }
         try {
             URL url = new URL(urlString);
-            String protocol = url.getProtocol().toLowerCase();
+            String protocol = url.getProtocol().toLowerCase(Locale.ROOT);
             if (!protocol.equals("http") && !protocol.equals("https")) return "";
-            String host = url.getHost().toLowerCase();
+            String host = url.getHost().toLowerCase(Locale.ROOT);
             if (host.isEmpty()) return "";
 
             int port = url.getPort();
@@ -122,7 +123,7 @@ public class UrlUtils {
      * @return {@code true} if the URL path ends in a recognised document extension.
      */
     public static boolean isDocumentLink(String url) {
-        String lower = url.toLowerCase();
+        String lower = url.toLowerCase(Locale.ROOT);
         int hashIdx = lower.indexOf('#');
         if (hashIdx != -1) lower = lower.substring(0, hashIdx);
         int queryIdx = lower.indexOf('?');
@@ -155,7 +156,7 @@ public class UrlUtils {
      * @return {@code true} if the URL should be skipped without fetching.
      */
     public static boolean isIgnoredLink(String url) {
-        String lower = url.toLowerCase();
+        String lower = url.toLowerCase(Locale.ROOT);
         int hashIdx = lower.indexOf('#');
         if (hashIdx != -1) {
             lower = lower.substring(0, hashIdx);

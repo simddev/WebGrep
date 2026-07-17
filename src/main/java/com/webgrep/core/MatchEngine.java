@@ -4,6 +4,7 @@ import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -109,7 +110,11 @@ public class MatchEngine {
                 // Require at least 2 chars after stripping so that keywords like "(C)" or "C++"
                 // don't degrade to a single letter that matches every word in the text.
                 if (simpleKeyword.length() >= 2) {
-                    String simpleText = superSimplify(text);
+                    // Use simplifyWithSpaces so that word boundaries are preserved:
+                    // "sofa" must not match "so far away" because the space between "so" and "far"
+                    // prevents a contiguous substring match. superSimplify would strip the space
+                    // and concatenate adjacent words, causing cross-word false positives.
+                    String simpleText = simplifyWithSpaces(text);
                     int simpleCount = 0;
                     int idx = 0;
                     while ((idx = simpleText.indexOf(simpleKeyword, idx)) != -1) {
@@ -157,7 +162,7 @@ public class MatchEngine {
         // Flatten whitespace so snippets read cleanly as a single line.
         // U+00A0 (non-breaking space) is normalised here too - SPA pages deliver it via
         // textContent and it would otherwise survive into snippet text invisibly.
-        String flat = text.replaceAll("[\r\n\t ]+", " ").replaceAll(" {2,}", " ").trim();
+        String flat = text.replaceAll("[\r\n\t\u00A0]+", " ").replaceAll(" {2,}", " ").trim();
 
         List<String> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -193,15 +198,30 @@ public class MatchEngine {
                 StringBuilder simpleBuf = new StringBuilder(flat.length());
                 int[] origPos = new int[flat.length() * 2 + 1]; // *2 for rare ligature decomposition
                 int sLen = 0;
+                // In default mode, preserve spaces so the position map respects word boundaries:
+                // "sofa" must not find a snippet in "so far away" (same reason as in countMatches).
+                // Fuzzy mode keeps the space-stripping behaviour to match countFuzzyMatches.
+                boolean preserveSpaces = mode.equals("default");
                 for (int ci = 0; ci < flat.length(); ci++) {
-                    String nfd = Normalizer.normalize(String.valueOf(flat.charAt(ci)), Normalizer.Form.NFD);
-                    for (char nc : nfd.toCharArray()) {
-                        int type = Character.getType(nc);
-                        if (type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
-                                || type == Character.ENCLOSING_MARK) continue;
-                        char lc = Character.toLowerCase(nc);
+                    char c = flat.charAt(ci);
+                    if (c < 128) {
+                        // ASCII fast path: NFD is a no-op for ASCII characters.
+                        char lc = Character.toLowerCase(c);
                         if ((lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9')) {
                             if (sLen < origPos.length) { origPos[sLen++] = ci; simpleBuf.append(lc); }
+                        } else if (preserveSpaces && c == ' ') {
+                            if (sLen < origPos.length) { origPos[sLen++] = ci; simpleBuf.append(' '); }
+                        }
+                    } else {
+                        String nfd = Normalizer.normalize(String.valueOf(c), Normalizer.Form.NFD);
+                        for (char nc : nfd.toCharArray()) {
+                            int type = Character.getType(nc);
+                            if (type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
+                                    || type == Character.ENCLOSING_MARK) continue;
+                            char lc = Character.toLowerCase(nc);
+                            if ((lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9')) {
+                                if (sLen < origPos.length) { origPos[sLen++] = ci; simpleBuf.append(lc); }
+                            }
                         }
                     }
                 }
@@ -240,7 +260,13 @@ public class MatchEngine {
         int hi = Math.min(flat.length(), end + 60);
         while (lo > 0 && flat.charAt(lo - 1) != ' ') lo--;
         while (hi < flat.length() && flat.charAt(hi) != ' ') hi++;
-        return (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
+        String snippet = (lo > 0 ? "..." : "") + flat.substring(lo, hi).trim() + (hi < flat.length() ? "..." : "");
+        // Strip C0 control characters (0x00–0x1F, 0x7F) to prevent terminal escape injection
+        // from binary or minified content that survived Tika/Jsoup extraction.
+        snippet = snippet.replaceAll("[\\x00-\\x1F\\x7F]", "");
+        // Cap length to prevent multi-KB snippets from minified JS or data-dense pages.
+        if (snippet.length() > 500) snippet = snippet.substring(0, 497) + "...";
+        return snippet;
     }
 
     /**
@@ -319,7 +345,7 @@ public class MatchEngine {
         if (input == null) return "";
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
         normalized = normalized.replaceAll("\\p{M}", "");
-        return normalized.toLowerCase().replaceAll("[^a-z0-9]", "");
+        return normalized.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -336,7 +362,7 @@ public class MatchEngine {
         if (input == null) return "";
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
         normalized = normalized.replaceAll("\\p{M}", "");
-        return normalized.toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
+        return normalized.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\s]", " ");
     }
 
     /**

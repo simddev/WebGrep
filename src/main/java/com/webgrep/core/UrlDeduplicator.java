@@ -83,8 +83,11 @@ public class UrlDeduplicator {
 
         int q = key.indexOf('?');
         if (q == -1) {
-            // No query params: duplicate if we've seen this base path before
-            return canonicalPathParams.containsKey(key);
+            // Bare path: duplicate only if it was previously queued without any params.
+            // A bare path is NOT a duplicate of a parameterised variant already queued —
+            // /article after queuing /article?id=5 may well be different content.
+            Set<String> canonical = canonicalPathParams.get(key);
+            return canonical != null && canonical.isEmpty();
         }
 
         String base = key.substring(0, q);

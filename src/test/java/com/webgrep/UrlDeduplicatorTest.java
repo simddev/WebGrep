@@ -276,4 +276,30 @@ public class UrlDeduplicatorTest {
         // Same path + superset params via http → still a dup
         assertTrue(d.isDuplicate("http://example.com/list?sort=asc&page=2"));
     }
+
+    // ── bare path after parameterised variant (M-3) ───────────────────────────
+
+    @Test
+    public void testBarePathNotBlockedByParameterisedVariant() {
+        // Queuing /article?id=5 must NOT suppress a later visit to /article (bare path).
+        // Both may carry distinct content and must be visited independently.
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        assertFalse(d.isDuplicate("http://example.com/article?id=5"));
+        d.markQueued("http://example.com/article?id=5");
+
+        // Bare path must NOT be treated as a duplicate.
+        assertFalse("bare path must not be blocked by a queued parameterised variant",
+                d.isDuplicate("http://example.com/article"));
+    }
+
+    @Test
+    public void testBarePathAfterBarePathIsDeduped() {
+        // Visiting the bare path and then seeing the same bare path again IS a duplicate.
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        assertFalse(d.isDuplicate("http://example.com/about"));
+        d.markQueued("http://example.com/about");
+
+        assertTrue("same bare path twice must be a duplicate",
+                d.isDuplicate("http://example.com/about"));
+    }
 }

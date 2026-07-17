@@ -897,4 +897,76 @@ public class MainTest {
         assertTrue("Very short body + JS bundle must still be detected as SPA",
                 com.webgrep.core.PlaywrightRenderer.isSpa(doc));
     }
+
+    // ── H-1: word-boundary false positives in default mode ───────────────────
+
+    @Test
+    public void testDefaultModeDoesNotMatchAcrossWordBoundaries() {
+        MatchEngine engine = new MatchEngine();
+        // "sofa" must not match "so far away" - the space between "so" and "far"
+        // means there is no contiguous occurrence of the keyword.
+        assertEquals(0, engine.countMatches("so far away", "sofa", "default"));
+        assertEquals(0, engine.countMatches("the so far away journey", "sofa", "default"));
+    }
+
+    @Test
+    public void testDefaultModeStillMatchesDiacriticVariants() {
+        MatchEngine engine = new MatchEngine();
+        // The word-boundary fix must not break diacritic matching.
+        assertEquals(1, engine.countMatches("Café is great", "cafe", "default"));
+        assertEquals(2, engine.countMatches("Café and cafe", "cafe", "default"));
+        assertEquals(1, engine.countMatches("Tomáš visited", "tomas", "default"));
+    }
+
+    @Test
+    public void testDefaultModeSnippetDoesNotMatchAcrossWordBoundaries() {
+        MatchEngine engine = new MatchEngine();
+        List<String> snippets = engine.findSnippets("so far away", "sofa", "default", 5);
+        assertTrue("sofa must not produce a snippet in 'so far away'", snippets.isEmpty());
+    }
+
+    @Test
+    public void testFuzzyModeStillMatchesAcrossWordBoundaries() {
+        MatchEngine engine = new MatchEngine();
+        // Fuzzy mode intentionally strips spaces so "sofa" CAN match "so far away"
+        // (space-stripped text is "sofaraway"). This is expected fuzzy behaviour.
+        assertTrue(engine.countMatches("so far away", "sofa", "fuzzy") > 0);
+    }
+
+    // ── M-4: malformed flag rejection ─────────────────────────────────────────
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testMultiCharSingleDashFlagIsRejected() {
+        // -url is not a valid flag; --url is correct.
+        CliOptions.parse(new String[]{"-url", "http://example.com", "-k", "test"});
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testCombinedFlagsAreRejected() {
+        // -ke looks like a combined flag but WebGrep does not support flag combination.
+        CliOptions.parse(new String[]{"-ke", "test"});
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testPositionalArgIsRejected() {
+        // A bare word with no flag prefix must throw, not silently disappear.
+        CliOptions.parse(new String[]{"http://example.com", "-k", "test"});
+    }
+
+    // ── L-5: URL with no host ─────────────────────────────────────────────────
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testUrlWithNoHostIsRejected() {
+        CliOptions options = CliOptions.parse(new String[]{"-u", "http://", "-k", "test"});
+        options.validate();
+    }
+
+    // ── L-6: timeout = 0 ─────────────────────────────────────────────────────
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testTimeoutZeroIsRejected() {
+        // timeout 0 means infinite timeout in Jsoup; must be rejected.
+        CliOptions options = CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "-t", "0"});
+        options.validate();
+    }
 }
