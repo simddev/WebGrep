@@ -59,7 +59,8 @@ public class Main {
      * </ol>
      *
      * <p>Exit codes: {@code 0} = success; {@code 1} = configuration error;
-     * {@code 2} = fatal runtime error.
+     * {@code 2} = fatal runtime error, including an {@code --install-browser} run that ends
+     * without a usable browser.
      *
      * @param args raw command-line arguments.
      */
@@ -75,7 +76,9 @@ public class Main {
             }
 
             if (options.isInstallBrowser()) {
-                installBrowser(options);
+                // A failed installation must fail the command, so that a script preparing a
+                // machine for SPA crawls stops there instead of carrying on without a browser.
+                if (!installBrowser(options)) System.exit(2);
                 return;
             }
 
@@ -551,16 +554,18 @@ public class Main {
      * delete it.
      *
      * @param options parsed CLI options; {@code options.getBrowser()} controls the preference.
+     * @return {@code true} if a usable browser is available at the end; {@code false} if the
+     *         installation failed or the installed browser does not start.
      * @throws Exception if the installer cannot be started.
      */
-    private static void installBrowser(CliOptions options) throws Exception {
+    private static boolean installBrowser(CliOptions options) throws Exception {
         String pref = options.getBrowser(); // "auto", "firefox", or "chromium"
 
         String ready = PlaywrightRenderer.findUsableBrowser(options.getTimeoutMs(), pref);
         if (ready != null) {
             System.out.println(ready + " is already available.");
             System.out.println("WebGrep will use it automatically - no installation needed.");
-            return;
+            return true;
         }
 
         String toInstall;
@@ -580,15 +585,16 @@ public class Main {
         System.out.println("Installing Playwright " + label + " into " + PlaywrightRenderer.browsersPath() + "...");
         int exitCode = PlaywrightRenderer.installBrowser(toInstall);
         if (exitCode != 0) {
-            System.err.println("Warning: browser installer exited with code " + exitCode + ".");
-            return;
+            System.err.println("Error: browser installer exited with code " + exitCode + ".");
+            return false;
         }
         String installed = PlaywrightRenderer.findUsableBrowser(options.getTimeoutMs(), toInstall);
         if (installed == null) {
-            System.err.println("Warning: the browser was installed but could not be started.");
-            return;
+            System.err.println("Error: the browser was installed but could not be started.");
+            return false;
         }
         System.out.println("Done. WebGrep will use " + installed + " for SPA pages.");
+        return true;
     }
 
     /**

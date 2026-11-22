@@ -149,7 +149,7 @@ Fuzzy mode is the one special case. It falls back to typo matching only where no
 
 ### 3.5 `installBrowser()`
 
-Handles the `--install-browser` flag. First asks `PlaywrightRenderer.findUsableBrowser()` whether a browser WebGrep can use is already there, in the renderer's own order (6.3). That check launches each candidate and closes it again, so "already available" means "starts" - a cached build left behind by a different Playwright version, or an installed branded Firefox, does not count.
+Handles the `--install-browser` flag. It exits with status 2 when it ends without a usable browser, so a script that prepares a machine for SPA crawls stops there. First asks `PlaywrightRenderer.findUsableBrowser()` whether a browser WebGrep can use is already there, in the renderer's own order (6.3). That check launches each candidate and closes it again, so "already available" means "starts" - a cached build left behind by a different Playwright version, or an installed branded Firefox, does not count.
 
 If nothing starts, the browser named by `--browser` is installed, or the user is asked to choose (Firefox by default). `PlaywrightRenderer.installBrowser()` runs the official Playwright installer in a subprocess, into WebGrep's own browser folder, and the result is verified by launching it.
 
@@ -533,7 +533,7 @@ Problem with `getAttribute`: Angular and other SPAs set `<base href="/app/">` in
 
 Solution: use `a.href`, let the browser handle the `<base href>` resolution, and receive the already-correct absolute URL.
 
-The same snapshot returns the page's text source: the **HTML** of a clone of the content root (`main`, `[role=main]`, `app-root`, `#app`, `#root`, `#content`, or the body), with `script`, `style`, `noscript` and `template` elements removed. Java turns it into text with Jsoup (`renderedText()`), exactly as for a plain HTML page. Taking `textContent` in the browser instead would glue words together: it puts nothing between elements, and React, Vue and Angular output has no whitespace between them, so `<h1>Hello</h1><p>World</p>` would read as `HelloWorld` and the phrase "hello world" would never match.
+The same snapshot returns the page's text source: the **HTML** of a clone of the page body, with `script`, `style`, `noscript` and `template` elements removed. Java turns it into text with Jsoup (`renderedText()`), exactly as for a plain HTML page. The whole body matters: an app usually mounts into one element (`#root`, `app-root`) while the page around it holds static text such as a footer, and the rendered text replaces the plain fetch's text, so taking only the mount point would lose text that a plain fetch had found. Taking `textContent` in the browser instead would glue words together: it puts nothing between elements, and React, Vue and Angular output has no whitespace between them, so `<h1>Hello</h1><p>World</p>` would read as `HelloWorld` and the phrase "hello world" would never match.
 
 The `raw` variable from `a.getAttribute('href')` is still checked first - but only to filter out `javascript:`, `mailto:`, and pure fragment links (`#` or `#something`), which cannot be detected by checking `a.href` alone (the browser resolves `#` to the full current page URL).
 

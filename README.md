@@ -154,7 +154,7 @@ java -jar WebGrep.jar --install-browser --browser firefox
 java -jar WebGrep.jar --install-browser --browser chromium
 ```
 
-If a usable browser is already present, this command reports it and exits without downloading anything. "Usable" is checked by starting the browser, not just by looking for its files.
+If a usable browser is already present, this command reports it and exits without downloading anything. "Usable" is checked by starting the browser, not just by looking for its files. If the installation fails, the command exits with status 2, so a script can stop there.
 
 ### Additional Details
 

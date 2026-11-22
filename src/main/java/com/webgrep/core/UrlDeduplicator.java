@@ -154,6 +154,23 @@ public class UrlDeduplicator {
     }
 
     /**
+     * Returns {@code true} if two URLs are the same page under the active dedup rule: they
+     * differ at most in scheme ({@code http} or {@code https}) and, in smart mode, in noise
+     * parameters.
+     *
+     * <p>The crawler uses this after a redirect. A redirect from a URL to one of its own
+     * variants - from {@code http://} to {@code https://}, say - lands on the page that was
+     * requested, not on a second page that happens to be queued already.
+     *
+     * @param a one normalised URL.
+     * @param b another normalised URL.
+     * @return whether both URLs have the same dedup key.
+     */
+    public boolean sameKey(String a, String b) {
+        return allUrls ? schemeKey(a).equals(schemeKey(b)) : canonicalKey(a).equals(canonicalKey(b));
+    }
+
+    /**
      * Returns the total number of distinct keys queued so far.
      *
      * @return number of queued URLs.

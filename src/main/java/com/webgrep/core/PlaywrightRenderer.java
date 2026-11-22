@@ -320,7 +320,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                 } catch (TimeoutError ignored) {}
             }
 
-            // Single evaluate round-trip: collect resolved hrefs and the content root's HTML.
+            // Single evaluate round-trip: collect resolved hrefs and the body's HTML.
             // Previous approach called querySelectorAll then getAttribute per element - one
             // IPC call per anchor (80+ on some pages), adding ~150ms and leaking ElementHandles.
             @SuppressWarnings("unchecked")
@@ -341,10 +341,10 @@ public class PlaywrightRenderer implements AutoCloseable {
                     // Links marked with the HTML5 download attribute are file downloads, not navigation.
                     + "    if (a.hasAttribute('download')) ds.push(h);"
                     + "  }"
-                    + "  const wgRoot = document.querySelector("
-                    + "    'main, [role=main], [role=content], app-root, #app, #root, #content'"
-                    + "  ) || document.body;"
-                    + "  const wgClone = wgRoot ? wgRoot.cloneNode(true) : null;"
+                    // The whole body, as for a plain page. An app usually mounts into one element
+                    // (#root, app-root) while the page around it holds static text such as a
+                    // footer; rendering must not lose text that a plain fetch would have found.
+                    + "  const wgClone = document.body ? document.body.cloneNode(true) : null;"
                     + "  if (wgClone) wgClone.querySelectorAll('script,style,noscript,template')"
                     + "                      .forEach(n => n.remove());"
                     + "  const wgAttr = s => { const e = document.querySelector(s);"
@@ -420,7 +420,7 @@ public class PlaywrightRenderer implements AutoCloseable {
      * <p>Package-private so that tests can check the text without a browser.
      *
      * @param title       the document title.
-     * @param bodyHtml    the inner HTML of the page's content root, with scripts and styles removed.
+     * @param bodyHtml    the inner HTML of the page body, with scripts, styles and templates removed.
      * @param description the {@code meta name=description} content.
      * @param keywords    the {@code meta name=keywords} content.
      * @return the page text.

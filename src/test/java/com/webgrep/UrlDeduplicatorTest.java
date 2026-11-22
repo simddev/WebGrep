@@ -340,4 +340,19 @@ public class UrlDeduplicatorTest {
         assertTrue("same bare path twice must be a duplicate",
                 d.isDuplicate("http://example.com/about"));
     }
+
+    // ── same page under another spelling ──────────────────────────────────────
+
+    @Test
+    public void testSameKeyRecognisesVariantsOfOneUrl() {
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        assertTrue(d.sameKey("http://example.com/a", "https://example.com/a"));
+        assertTrue(d.sameKey("https://example.com/a?id=1", "http://example.com/a?utm_source=x&id=1"));
+        assertFalse(d.sameKey("https://example.com/a", "https://example.com/b"));
+        assertFalse(d.sameKey("https://example.com/a?id=1", "https://example.com/a?id=2"));
+
+        UrlDeduplicator exact = new UrlDeduplicator(true);
+        assertTrue(exact.sameKey("http://example.com/a", "https://example.com/a"));
+        assertFalse(exact.sameKey("https://example.com/a", "https://example.com/a?utm_source=x"));
+    }
 }

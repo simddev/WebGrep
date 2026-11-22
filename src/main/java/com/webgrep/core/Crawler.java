@@ -291,8 +291,12 @@ public class Crawler {
                     String effectiveUrl = normalized.isEmpty() ? rawEffective : normalized;
                     if (!effectiveUrl.equals(current.url)) {
                         // Two queued URLs may redirect to the same target; skip content processing
-                        // for the second arrival so matches are not double-counted.
-                        if (dedup.isDuplicate(effectiveUrl)) {
+                        // for the second arrival so matches are not double-counted. A redirect to a
+                        // variant of the URL just fetched - http to https, the most common redirect
+                        // of all - lands on the requested page itself. The deduplicator sees that
+                        // variant as already queued, because the requested URL is, so it must not
+                        // be mistaken for a second arrival.
+                        if (!dedup.sameKey(effectiveUrl, current.url) && dedup.isDuplicate(effectiveUrl)) {
                             closeQuietly(response);
                             crawlResult.visitedCount++;
                             continue;

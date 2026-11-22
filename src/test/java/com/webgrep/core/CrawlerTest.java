@@ -315,4 +315,44 @@ public class CrawlerTest {
         assertEquals(0, result.getTotalMatches());
         assertEquals(1, (int) result.errorCounts.get(CrawlResult.ErrorType.SKIPPED_SIZE));
     }
+
+    // ── redirects to a variant of the requested URL ──────────────────────────
+
+    @Test
+    public void testRedirectToOwnVariantIsNotSkipped() {
+        // http to https is the most common redirect. A plain-HTTP test server cannot redirect to
+        // https, but a redirect that only adds a tracking parameter leads to a URL with the same
+        // dedup key as the requested one, exactly as the https variant of an http URL does.
+        routes.put("/v/", Reply.html("<a href=\"/v/page\">page</a>"));
+        routes.put("/v/page", Reply.redirect("/v/page?utm_source=feed"));
+        routes.put("/v/page?utm_source=feed", Reply.html("zebra on the page"));
+
+        CrawlResult result = crawl(url("localhost", "/v/"), "zebra");
+
+        assertEquals("The page a link redirects to must not be taken for a duplicate of that link",
+                1, result.getTotalMatches());
+    }
+
+    @Test
+    public void testSeedRedirectToOwnVariantIsNotSkipped() {
+        routes.put("/w/?utm_source=mail", Reply.redirect("/w/"));
+        routes.put("/w/", Reply.html("zebra at the seed"));
+
+        CrawlResult result = crawl(url("localhost", "/w/?utm_source=mail"), "zebra");
+
+        assertEquals(1, result.getTotalMatches());
+        assertEquals(1, result.visitedCount);
+    }
+
+    @Test
+    public void testTwoLinksRedirectingToOnePageCountItOnce() {
+        routes.put("/two/", Reply.html("<a href=\"/two/a\">a</a> <a href=\"/two/b\">b</a>"));
+        routes.put("/two/a", Reply.redirect("/two/target"));
+        routes.put("/two/b", Reply.redirect("/two/target"));
+        routes.put("/two/target", Reply.html("zebra"));
+
+        CrawlResult result = crawl(url("localhost", "/two/"), "zebra");
+
+        assertEquals(1, result.getTotalMatches());
+    }
 }
