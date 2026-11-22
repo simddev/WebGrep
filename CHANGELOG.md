@@ -2,6 +2,18 @@
 
 Notable changes in each WebGrep release. Versions that were never tagged are included in the next tagged release. Each release also has notes on the [releases page](https://github.com/simddev/WebGrep/releases).
 
+## [1.3.1] - 2026-11-22
+
+### Fixed
+
+- **A page reached through a redirect to its own https address was skipped.** After a redirect, the final URL was checked against the pages already queued, which treat `http://` and `https://` as the same page. The page was therefore taken for a duplicate of the URL just fetched and dropped without an error. This affected every site that redirects from http to https, including any URL typed without a scheme, since those default to `http://`: `webgrep -u github.com -k github` found nothing. A redirect that only added or removed a tracking parameter was skipped the same way. The bug was present since 1.1.8.
+- **SPA rendering dropped text outside the app's mount point.** Rendered text came only from the element the app mounts into (such as `#root`) and replaced the text of the plain fetch, so static text elsewhere on the page, like a footer, was lost. Rendered text now comes from the whole page body.
+- **`--install-browser` reported success after a failed installation.** It printed a warning but exited with status 0, so a script preparing a machine carried on without a browser. It now exits with status 2.
+
+### Tests
+
+259 to 263.
+
 ## [1.3.0] - 2026-11-22
 
 ### Security
@@ -130,6 +142,7 @@ First release.
 - Default (case- and diacritic-insensitive), exact and fuzzy (Levenshtein) matching.
 - Smart URL deduplication, `--max-hits`, and text or JSON output.
 
+[1.3.1]: https://github.com/simddev/WebGrep/releases/tag/v1.3.1
 [1.3.0]: https://github.com/simddev/WebGrep/releases/tag/v1.3.0
 [1.2.0]: https://github.com/simddev/WebGrep/releases/tag/v1.2.0
 [1.1.8]: https://github.com/simddev/WebGrep/releases/tag/v1.1.8
