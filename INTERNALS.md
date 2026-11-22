@@ -997,6 +997,6 @@ All tests use JUnit 4. There are no mocks. `AppIntegrationTest` writes real temp
 
 **Local deployment:**
 ```bash
-cp target/WebGrep-1.2.0.jar ~/.local/share/webgrep/WebGrep.jar
+cp target/WebGrep-1.3.0.jar ~/.local/share/webgrep/WebGrep.jar
 ```
 The shell wrapper at `~/.local/bin/webgrep` points to this JAR location.
