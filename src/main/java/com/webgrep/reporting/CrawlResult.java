@@ -34,6 +34,9 @@ public class CrawlResult {
         PARSE_ERROR,
         /** Response body exceeded the {@code --max-bytes} limit and was not parsed. */
         SKIPPED_SIZE,
+        /** A page redirected to another site and was not followed, because
+         *  {@code --allow-external} was not given. */
+        SKIPPED_OFFSITE,
         /** Reserved for future content-type filtering. Currently unused. */
         SKIPPED_TYPE
     }
@@ -46,6 +49,13 @@ public class CrawlResult {
 
     /** URL → human-readable reason, for every page that returned 403/429 or a bot challenge. */
     public final Map<String, String> blockedUrls = new LinkedHashMap<>();
+
+    /**
+     * In-scope URL → the off-site URL it redirected to, for every redirect that was not followed
+     * because {@code --allow-external} was not given. Covers HTTP redirects and zero-delay
+     * {@code <meta http-equiv="refresh">} redirects alike.
+     */
+    public final Map<String, String> offsiteRedirects = new LinkedHashMap<>();
 
     /** Per-category error counts. All keys are pre-populated to 0 in the constructor. */
     public final Map<ErrorType, Integer> errorCounts = new LinkedHashMap<>();
@@ -129,6 +139,19 @@ public class CrawlResult {
     public void addBlocked(String url, String reason) {
         blockedUrls.put(url, reason);
         incrementError(ErrorType.BLOCKED);
+    }
+
+    /**
+     * Records that {@code url} redirected to {@code target}, outside the crawl's domain scope,
+     * and that the redirect was not followed. Increments {@link ErrorType#SKIPPED_OFFSITE}.
+     *
+     * @param url    the in-scope URL that redirected.
+     * @param target the off-site URL it pointed to.
+     */
+    public void addOffsiteRedirect(String url, String target) {
+        if (offsiteRedirects.putIfAbsent(url, target) == null) {
+            incrementError(ErrorType.SKIPPED_OFFSITE);
+        }
     }
 
     /**

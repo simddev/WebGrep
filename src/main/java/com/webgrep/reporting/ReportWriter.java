@@ -1,6 +1,7 @@
 package com.webgrep.reporting;
 
 import com.webgrep.config.CliOptions;
+import com.webgrep.utils.ConsoleText;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,7 +20,9 @@ import java.util.Map;
  *
  * <p>Text output is formatted for direct human reading; JSON output is minified by field
  * but line-separated for readability, suitable for piping to {@code jq} or other tools.
- * All string values in JSON are escaped via {@link #escapeJson(String)}.
+ * All string values in JSON are escaped via {@link #escapeJson(String)}. In text output, every
+ * string that comes from outside WebGrep - URLs, snippets, file paths, server error messages -
+ * passes through {@link ConsoleText#safe} so that it cannot carry terminal escape sequences.
  */
 public class ReportWriter {
 
@@ -29,8 +32,8 @@ public class ReportWriter {
      * <p>The output includes: duration, total matches, page counts broken down into HTML pages
      * and binary documents, any crawl errors grouped by category, a sorted list of matching
      * URLs with context snippets, blocked/inaccessible URLs grouped by reason (capped at 10
-     * per reason to prevent flooding the output), and an early-stop notice if
-     * {@code --max-hits} was reached.
+     * per reason to prevent flooding the output), redirects to other sites that were not
+     * followed (also capped at 10), and an early-stop notice if {@code --max-hits} was reached.
      *
      * @param crawlResult the accumulated crawl statistics and results.
      */
@@ -55,7 +58,7 @@ public class ReportWriter {
                     if (type == CrawlResult.ErrorType.NETWORK_ERROR
                             && !crawlResult.networkErrorReasons.isEmpty()) {
                         crawlResult.networkErrorReasons.forEach((reason, n) ->
-                            System.out.println("    " + reason + ": " + n));
+                            System.out.println("    " + ConsoleText.safe(reason) + ": " + n));
                     }
                 }
             }
@@ -67,10 +70,10 @@ public class ReportWriter {
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
                         .thenComparing(Map.Entry.comparingByKey()))
                 .forEach(entry -> {
-                    System.out.println("  " + entry.getKey() + " (" + entry.getValue() + ")");
+                    System.out.println("  " + ConsoleText.safe(entry.getKey()) + " (" + entry.getValue() + ")");
                     List<String> snips = crawlResult.snippets.get(entry.getKey());
                     if (snips != null && !snips.isEmpty()) {
-                        snips.forEach(s -> System.out.println("    \"" + s + "\""));
+                        snips.forEach(s -> System.out.println("    \"" + ConsoleText.safe(s) + "\""));
                         int remaining = entry.getValue() - snips.size();
                         if (remaining > 0) System.out.println("    (+ " + remaining + " more)");
                     }
@@ -86,14 +89,26 @@ public class ReportWriter {
             );
             for (Map.Entry<String, List<String>> entry : byReason.entrySet()) {
                 List<String> urls = entry.getValue();
-                System.out.println("  " + entry.getKey() + " (" + urls.size() + "):");
+                System.out.println("  " + ConsoleText.safe(entry.getKey()) + " (" + urls.size() + "):");
                 int shown = Math.min(urls.size(), 10);
                 for (int i = 0; i < shown; i++) {
-                    System.out.println("    " + urls.get(i));
+                    System.out.println("    " + ConsoleText.safe(urls.get(i)));
                 }
                 if (urls.size() > shown) {
                     System.out.println("    ... and " + (urls.size() - shown) + " more");
                 }
+            }
+        }
+
+        if (!crawlResult.offsiteRedirects.isEmpty()) {
+            System.out.println("\nRedirected to another site (not followed without --allow-external):");
+            int shown = 0;
+            for (Map.Entry<String, String> entry : crawlResult.offsiteRedirects.entrySet()) {
+                if (shown++ == 10) break;
+                System.out.println("    " + ConsoleText.safe(entry.getKey()) + " -> " + ConsoleText.safe(entry.getValue()));
+            }
+            if (crawlResult.offsiteRedirects.size() > 10) {
+                System.out.println("    ... and " + (crawlResult.offsiteRedirects.size() - 10) + " more");
             }
         }
 
@@ -109,7 +124,8 @@ public class ReportWriter {
      * <p>The JSON structure includes: {@code query} (URL, depth, keyword, mode),
      * {@code stats} (timing, counts, error breakdown), an optional {@code stopped_early} field,
      * {@code results} array (sorted by match count descending, with snippets when present),
-     * and {@code blocked} array. All string values are escaped via {@link #escapeJson}.
+     * {@code blocked} array, and {@code redirected_offsite} array (redirects to other sites that
+     * were not followed). All string values are escaped via {@link #escapeJson}.
      *
      * @param crawlResult the accumulated crawl statistics and results.
      * @param options     the parsed CLI options, used to echo the query parameters back.
@@ -185,6 +201,15 @@ public class ReportWriter {
             if (i < blockedList.size() - 1) json.append(",");
             json.append("\n");
         }
+        json.append("  ],\n");
+        json.append("  \"redirected_offsite\": [\n");
+        List<Map.Entry<String, String>> offsite = new ArrayList<>(crawlResult.offsiteRedirects.entrySet());
+        for (int i = 0; i < offsite.size(); i++) {
+            Map.Entry<String, String> entry = offsite.get(i);
+            json.append("    { \"url\": \"").append(escapeJson(entry.getKey())).append("\", \"target\": \"").append(escapeJson(entry.getValue())).append("\" }");
+            if (i < offsite.size() - 1) json.append(",");
+            json.append("\n");
+        }
         json.append("  ]\n");
         json.append("}\n");
         System.out.println(json.toString());
@@ -211,7 +236,7 @@ public class ReportWriter {
 
         System.out.println("--- WebGrep Results ---");
         System.out.println("Duration: " + formatDuration(durationMs));
-        System.out.println("Folder: " + options.getFolder());
+        System.out.println("Folder: " + ConsoleText.safe(options.getFolder()));
         System.out.println("Files scanned: " + filesScanned);
         if (filesSkipped > 0)
             System.out.println("  Skipped (too large): " + filesSkipped);
@@ -229,14 +254,14 @@ public class ReportWriter {
 
         for (FileScanResult file : results) {
             boolean hasPages = file.matches().stream().anyMatch(m -> m.page() > 0);
-            System.out.println("\n" + file.path() + "  (" + file.totalMatches() + " match"
+            System.out.println("\n" + ConsoleText.safe(file.path()) + "  (" + file.totalMatches() + " match"
                     + (file.totalMatches() == 1 ? "" : "es") + ")");
             for (FileMatch m : file.matches()) {
                 String loc = hasPages
                         ? String.format("p.%d, l.%d", m.page(), m.line())
                         : String.format("l.%d", m.line());
                 String countStr = m.count() == 1 ? "(1 match)" : "(" + m.count() + " matches)";
-                System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, m.snippet());
+                System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, ConsoleText.safe(m.snippet()));
             }
         }
     }
@@ -324,7 +349,7 @@ public class ReportWriter {
 
         System.out.println("--- WebGrep Results ---");
         System.out.println("Duration: " + formatDuration(durationMs));
-        System.out.println("File: " + options.getFile());
+        System.out.println("File: " + ConsoleText.safe(options.getFile()));
         System.out.println("Total matches found: " + total);
 
         if (matches.isEmpty()) return;
@@ -335,7 +360,7 @@ public class ReportWriter {
                     ? String.format("p.%d, l.%d", m.page(), m.line())
                     : String.format("l.%d", m.line());
             String countStr = m.count() == 1 ? "(1 match)" : "(" + m.count() + " matches)";
-            System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, m.snippet());
+            System.out.printf("  %-16s  %s  \"%s\"%n", loc, countStr, ConsoleText.safe(m.snippet()));
         }
     }
 
@@ -393,6 +418,7 @@ public class ReportWriter {
             case BLOCKED       -> "Blocked";
             case PARSE_ERROR   -> "Parse errors";
             case SKIPPED_SIZE  -> "Skipped (size limit)";
+            case SKIPPED_OFFSITE -> "Skipped (redirected off-site)";
             case SKIPPED_TYPE  -> "Skipped (type filter)";
         };
     }
@@ -419,8 +445,10 @@ public class ReportWriter {
      * Escapes a string for safe inclusion as a JSON string value.
      *
      * <p>Handles the following characters: {@code \} → {@code \\}, {@code "} → {@code \"},
-     * newline → {@code \n}, carriage return → {@code \r}, tab → {@code \t}, and any other
-     * control character below U+0020 is written as a {@code \\u} Unicode escape sequence.
+     * newline → {@code \n}, carriage return → {@code \r}, tab → {@code \t}, and every other
+     * control character - below U+0020, DEL, and the C1 range U+0080 to U+009F - is written as
+     * a {@code \\u} Unicode escape sequence. DEL and C1 are allowed raw in JSON, but escaping
+     * them keeps the output safe to view in a terminal.
      * Non-BMP code points (emoji, supplementary characters) are handled correctly by iterating
      * over code points rather than {@code char} values, avoiding lone-surrogate emission.
      *
@@ -438,7 +466,7 @@ public class ReportWriter {
                 case '\r' -> sb.append("\\r");
                 case '\t' -> sb.append("\\t");
                 default   -> {
-                    if (cp < 0x20) {
+                    if (cp < 0x20 || (cp >= 0x7F && cp <= 0x9F)) {
                         sb.append(String.format("\\u%04x", cp));
                     } else {
                         sb.appendCodePoint(cp);

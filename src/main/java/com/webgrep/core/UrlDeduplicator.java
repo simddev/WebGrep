@@ -6,20 +6,32 @@ import java.util.*;
  * Tracks which URLs have been queued and decides whether a new URL is a duplicate.
  *
  * <h2>Smart deduplication (default, {@code allUrls = false})</h2>
- * <p>A URL with query parameters is considered a duplicate of an already-queued URL if its
- * parameter set is a <em>superset</em> of the first-queued URL's parameters for that base path
- * (same keys AND same values). This rule deduplicates sort/filter/pagination variants without
- * suppressing genuinely different content:
+ * <p>Two URLs are the same page when they differ only in <em>noise</em> query parameters -
+ * parameters that never change what a page contains:
+ * <ul>
+ *   <li>campaign and click tracking: {@code utm_*}, {@code gclid}, {@code fbclid},
+ *       {@code msclkid} and similar;</li>
+ *   <li>session identifiers: {@code jsessionid}, {@code phpsessid}, {@code sessionid},
+ *       {@code session_id}, and {@code sid} when its value is a long token;</li>
+ *   <li>sort order: {@code sort}, {@code sortby}, {@code orderby} and their underscore forms,
+ *       and {@code order}, {@code dir} or {@code direction} when the value is a direction
+ *       such as {@code asc} or {@code desc}.</li>
+ * </ul>
+ * Every other parameter is assumed to select content, so it keeps URLs apart. The order of
+ * parameters does not matter.
  *
  * <pre>
- *   queue  /list?id=1           → canonical params for /list = {"id=1"}
- *   queue  /list?id=1&amp;sort=asc  → params {"id=1","sort=asc"} ⊇ {"id=1"} → DUPLICATE (skipped)
- *   queue  /list?id=2           → params {"id=2"} ⊉ {"id=1"}               → not a duplicate (queued)
+ *   queue  /list?q=x                 → key /list?q=x
+ *   queue  /list?q=x&amp;sort=date       → key /list?q=x          → DUPLICATE (only a sort order added)
+ *   queue  /list?q=x&amp;page=2          → key /list?page=2&amp;q=x   → not a duplicate (another page of results)
+ *   queue  /item?id=5&amp;utm_source=a   → key /item?id=5         → not a duplicate of /list, queued
  * </pre>
  *
+ * <p>Assuming the opposite - that any added parameter is a harmless variant - silently skips
+ * real content: page 2 of a search, or later pages of a forum thread.
+ *
  * <h2>All-URLs mode ({@code allUrls = true})</h2>
- * <p>Only exact-URL duplicates are suppressed; every distinct URL string is visited regardless
- * of query parameter relationships.
+ * <p>Only exact-URL duplicates are suppressed; every distinct URL string is visited.
  *
  * <h2>Scheme normalisation</h2>
  * <p>{@code http://} and {@code https://} variants of the same URL are always treated as
@@ -27,27 +39,40 @@ import java.util.*;
  */
 public class UrlDeduplicator {
 
+    /** Parameters that never change what a page contains, whatever their value. */
+    private static final Set<String> NOISE_PARAMS = Set.of(
+            // click and campaign tracking (utm_* is matched by prefix)
+            "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "fbclid", "msclkid", "yclid",
+            "twclid", "ttclid", "igshid", "mc_cid", "mc_eid", "_ga", "_gl", "_hsenc", "_hsmi",
+            "mkt_tok", "ref_src",
+            // session identifiers
+            "jsessionid", "phpsessid", "sessionid", "session_id",
+            // sort keys
+            "sort", "sortby", "sort_by", "orderby", "order_by");
+
+    /**
+     * Parameters that are noise only when their value is a sort direction: {@code ?dir=asc}
+     * sorts a listing, but {@code ?dir=/reports} opens a different folder.
+     */
+    private static final Set<String> DIRECTION_PARAMS = Set.of("order", "dir", "direction");
+
+    /** Values that mark a sort direction. */
+    private static final Set<String> DIRECTION_VALUES = Set.of("asc", "desc", "ascending", "descending");
+
+    /** Shortest {@code sid} value treated as a session token rather than, say, a survey id. */
+    private static final int MIN_SESSION_TOKEN_LENGTH = 16;
+
     /** Whether to bypass smart dedup and only suppress exact-URL duplicates. */
     private final boolean allUrls;
 
-    /**
-     * Scheme-normalised URL strings of every URL that has been queued so far.
-     * {@code http://} is stored as {@code https://} so scheme variants collapse to one entry.
-     */
+    /** Keys of every URL queued so far: the canonical key, or the scheme key in all-URLs mode. */
     private final Set<String> queued = new HashSet<>();
-
-    /**
-     * Maps each base path (scheme-normalised, no query string) to the canonical query parameter
-     * set recorded when that path was first queued. An empty set means the path was queued
-     * without any query parameters.
-     */
-    private final Map<String, Set<String>> canonicalPathParams = new HashMap<>();
 
     /**
      * Constructs a new deduplicator.
      *
      * @param allUrls {@code true} to disable smart dedup and only suppress exact-URL duplicates;
-     *                {@code false} (default) to enable the superset-parameter dedup rule.
+     *                {@code false} (default) to ignore noise parameters when comparing URLs.
      */
     public UrlDeduplicator(boolean allUrls) {
         this.allUrls = allUrls;
@@ -67,71 +92,69 @@ public class UrlDeduplicator {
     }
 
     /**
-     * Returns {@code true} if this URL should be skipped because it is already queued or is
-     * determined to be a duplicate under the active dedup rule.
+     * Returns the key under which smart dedup compares a URL: the scheme key with noise
+     * parameters removed and the remaining parameters sorted.
      *
-     * <p>Exact duplicates (same scheme-normalised URL string) are always suppressed.
-     * When {@code allUrls = false}, the superset-parameter rule is also applied.
+     * @param url a normalised URL.
+     * @return the canonical key.
+     */
+    static String canonicalKey(String url) {
+        String key = schemeKey(url);
+        int q = key.indexOf('?');
+        if (q < 0) return key;
+        List<String> kept = new ArrayList<>();
+        for (String param : key.substring(q + 1).split("&")) {
+            if (!param.isEmpty() && !isNoise(param)) kept.add(param);
+        }
+        String base = key.substring(0, q);
+        if (kept.isEmpty()) return base;
+        Collections.sort(kept);
+        return base + "?" + String.join("&", kept);
+    }
+
+    /**
+     * Returns {@code true} if a {@code name=value} query parameter is noise (see the class
+     * description).
+     *
+     * @param param one parameter of a query string.
+     * @return whether the parameter can be ignored when comparing URLs.
+     */
+    static boolean isNoise(String param) {
+        int eq = param.indexOf('=');
+        String name = (eq < 0 ? param : param.substring(0, eq)).toLowerCase(Locale.ROOT);
+        String value = eq < 0 ? "" : param.substring(eq + 1);
+        if (name.startsWith("utm_") || NOISE_PARAMS.contains(name)) return true;
+        if (DIRECTION_PARAMS.contains(name)) return DIRECTION_VALUES.contains(value.toLowerCase(Locale.ROOT));
+        if (name.equals("sid")) {
+            return value.length() >= MIN_SESSION_TOKEN_LENGTH && value.chars().allMatch(Character::isLetterOrDigit);
+        }
+        return false;
+    }
+
+    /**
+     * Returns {@code true} if this URL should be skipped because it, or a URL differing from it
+     * only in noise parameters, has already been queued.
      *
      * @param url the candidate URL to test (should be normalised via {@link com.webgrep.utils.UrlUtils#normalizeUrl}).
      * @return {@code true} if the URL should be skipped; {@code false} if it should be queued.
      */
     public boolean isDuplicate(String url) {
-        String key = schemeKey(url);
-        if (queued.contains(key)) return true;
-        if (allUrls) return false;
-
-        int q = key.indexOf('?');
-        if (q == -1) {
-            // Bare path: duplicate only if it was previously queued without any params.
-            // A bare path is NOT a duplicate of a parameterised variant already queued —
-            // /article after queuing /article?id=5 may well be different content.
-            Set<String> canonical = canonicalPathParams.get(key);
-            return canonical != null && canonical.isEmpty();
-        }
-
-        String base = key.substring(0, q);
-        if (!canonicalPathParams.containsKey(base)) return false;
-
-        Set<String> canonical = canonicalPathParams.get(base);
-        // Base path was visited without any params → allow parameterised variants through;
-        // the bare path itself won't be re-queued (already in the queued set above).
-        if (canonical.isEmpty()) return false;
-
-        // Parse new URL's params as key=value tokens
-        Set<String> newParams = new HashSet<>(Arrays.asList(key.substring(q + 1).split("&")));
-        // Duplicate if new URL contains ALL canonical key=value pairs.
-        // e.g. ?id=1&sort=asc → dup of ?id=1  (adds sort param on top of same content ID)
-        //      ?id=2           → NOT dup of ?id=1  (different content ID value)
-        return newParams.containsAll(canonical);
+        return queued.contains(allUrls ? schemeKey(url) : canonicalKey(url));
     }
 
     /**
      * Records {@code url} as queued so that future calls to {@link #isDuplicate} will recognise
-     * it. Must be called immediately after {@link #isDuplicate} returns {@code false}.
-     *
-     * <p>Also records the canonical query-parameter set for the URL's base path if this is the
-     * first time the base path is seen (used by the superset dedup rule).
+     * it and its noise variants. Must be called immediately after {@link #isDuplicate} returns
+     * {@code false}.
      *
      * @param url the URL that has been accepted for queuing.
      */
     public void markQueued(String url) {
-        String key = schemeKey(url);
-        queued.add(key);
-        if (allUrls) return;
-
-        int q = key.indexOf('?');
-        String base = q != -1 ? key.substring(0, q) : key;
-        if (!canonicalPathParams.containsKey(base)) {
-            Set<String> params = q != -1
-                    ? new HashSet<>(Arrays.asList(key.substring(q + 1).split("&")))
-                    : Collections.emptySet();
-            canonicalPathParams.put(base, params);
-        }
+        queued.add(allUrls ? schemeKey(url) : canonicalKey(url));
     }
 
     /**
-     * Returns the total number of distinct URLs that have been queued so far.
+     * Returns the total number of distinct keys queued so far.
      *
      * @return number of queued URLs.
      */

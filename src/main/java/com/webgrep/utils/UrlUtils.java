@@ -1,6 +1,7 @@
 package com.webgrep.utils;
 
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -21,11 +22,17 @@ public class UrlUtils {
     /** Pre-compiled pattern for collapsing two or more consecutive slashes into one. */
     private static final Pattern DOUBLE_SLASH = Pattern.compile("/{2,}");
 
+    /** Upper-case hex digits for percent-encoding. */
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+
     /**
      * Resolves {@code urlString} to a canonical absolute {@code http://} or {@code https://} URL.
      *
      * <p>Resolution steps (in order):
      * <ol>
+     *   <li>Control characters are dealt with as a browser does: leading and trailing ones are
+     *       trimmed, tabs and newlines removed, and any other percent-encoded. A link taken from
+     *       page markup can therefore never carry an escape sequence any further.</li>
      *   <li>Protocol-relative URLs ({@code //host/path}) are prefixed with {@code https:} or
      *       {@code http:} based on the scheme of {@code baseUrlString}.</li>
      *   <li>Non-{@code http(s)} schemes ({@code javascript:}, {@code ftp:}, {@code data:}, etc.)
@@ -44,6 +51,10 @@ public class UrlUtils {
      */
     public static String normalizeUrl(String urlString, String baseUrlString) {
         if (urlString == null || urlString.isEmpty()) {
+            return "";
+        }
+        urlString = cleanRaw(urlString);
+        if (urlString.isEmpty()) {
             return "";
         }
         if (urlString.startsWith("//")) {
@@ -104,6 +115,42 @@ public class UrlUtils {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /**
+     * Applies the URL standard's first steps to a raw URL string before it is parsed.
+     *
+     * <p>Leading and trailing spaces and C0 control characters are trimmed, and tabs and
+     * newlines are removed wherever they occur - an {@code href} wrapped across lines in the
+     * HTML source is still one URL. Every other C0 control, DEL and C1 control is
+     * percent-encoded as UTF-8. Link targets taken straight from page markup (a
+     * {@code <meta http-equiv="refresh">} target, a URL found in a JSON response) would
+     * otherwise keep raw escape characters all the way to the terminal.
+     *
+     * @param s the raw URL string.
+     * @return the cleaned string; possibly empty.
+     */
+    private static String cleanRaw(String s) {
+        int from = 0, to = s.length();
+        while (from < to && s.charAt(from) <= ' ') from++;
+        while (to > from && s.charAt(to - 1) <= ' ') to--;
+        StringBuilder sb = null;
+        for (int i = from; i < to; i++) {
+            char c = s.charAt(i);
+            boolean drop = c == '\t' || c == '\n' || c == '\r';
+            boolean encode = !drop && ConsoleText.isControl(c);
+            if (drop || encode) {
+                if (sb == null) sb = new StringBuilder(to - from + 16).append(s, from, i);
+                if (encode) {
+                    for (byte b : String.valueOf(c).getBytes(StandardCharsets.UTF_8)) {
+                        sb.append('%').append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
+                    }
+                }
+            } else if (sb != null) {
+                sb.append(c);
+            }
+        }
+        return sb != null ? sb.toString() : s.substring(from, to);
     }
 
     /**

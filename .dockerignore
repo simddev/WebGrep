@@ -1,0 +1,5 @@
+# The image is built from pom.xml and src/ alone; keep everything else (the git history,
+# IDE settings, build output) out of the build context.
+*
+!pom.xml
+!src

@@ -6,6 +6,8 @@ import org.jsoup.nodes.Document;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -113,5 +115,93 @@ public class ContentExtractorTest {
         String extracted = extractor.extractTextFromBinary(bytes, "file.bin", "application/octet-stream");
         assertNotNull(extracted);
         assertFalse(extracted.isEmpty());
+    }
+
+    // ── PDF pages ──────────────────────────────────────────────────────────────
+
+    /**
+     * Writes a PDF with one page per element of {@code pages}, each page holding the given lines.
+     * Package-visible so the end-to-end tests can reuse it.
+     */
+    static Path writePdf(Path file, String[]... pages) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            org.apache.pdfbox.pdmodel.font.PDType1Font font = new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                    org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA);
+            for (String[] lines : pages) {
+                org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+                doc.addPage(page);
+                try (org.apache.pdfbox.pdmodel.PDPageContentStream cs =
+                             new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                    cs.beginText();
+                    cs.setFont(font, 12);
+                    cs.setLeading(14);
+                    cs.newLineAtOffset(72, 720);
+                    for (String line : lines) {
+                        cs.showText(line);
+                        cs.newLine();
+                    }
+                    cs.endText();
+                }
+            }
+            doc.save(file.toFile());
+        }
+        return file;
+    }
+
+    @Test
+    public void testPdfPagesAreSeparatedByFormFeeds() throws Exception {
+        Path pdf = writePdf(Files.createTempFile("webgrep-pages", ".pdf"),
+                new String[]{"page one text"}, new String[]{"page two text"}, new String[]{"page three text"});
+        try {
+            String text = extractor.extractTextFromBinary(Files.readAllBytes(pdf), pdf.getFileName().toString(), null);
+            String[] pages = text.split("\f", -1);
+            // A form feed between pages and one closing the last page: three pages, four parts.
+            assertEquals("Unexpected page structure: " + text.replace("\f", "<FF>"), 4, pages.length);
+            assertTrue(pages[0].contains("page one text"));
+            assertTrue(pages[1].contains("page two text"));
+            assertTrue(pages[2].contains("page three text"));
+            assertTrue(pages[3].isBlank());
+        } finally {
+            Files.deleteIfExists(pdf);
+        }
+    }
+
+    @Test
+    public void testOnePagePdfIsStillPaged() throws Exception {
+        Path pdf = writePdf(Files.createTempFile("webgrep-onepage", ".pdf"),
+                new String[]{"the attention", "mechanism is here"});
+        try {
+            String text = extractor.extractTextFromBinary(Files.readAllBytes(pdf), pdf.getFileName().toString(), null);
+            List<com.webgrep.reporting.FileMatch> matches =
+                    Main.findLineMatches(text, "attention mechanism", "default", new com.webgrep.core.MatchEngine());
+            assertEquals(1, matches.size());
+            assertEquals(1, matches.get(0).page());
+            assertEquals("Layout blank lines must not shift the line number", 1, matches.get(0).line());
+        } finally {
+            Files.deleteIfExists(pdf);
+        }
+    }
+
+    @Test
+    public void testPdfMatchesReportPageAndLine() throws Exception {
+        Path pdf = writePdf(Files.createTempFile("webgrep-lines", ".pdf"),
+                new String[]{"intro", "nothing"}, new String[]{"second page", "the attention", "mechanism is key"});
+        try {
+            String text = extractor.extractTextFromBinary(Files.readAllBytes(pdf), pdf.getFileName().toString(), null);
+            List<com.webgrep.reporting.FileMatch> matches =
+                    Main.findLineMatches(text, "attention mechanism", "default", new com.webgrep.core.MatchEngine());
+            assertEquals(1, matches.size());
+            assertEquals("The phrase is on page 2", 2, matches.get(0).page());
+            assertEquals("It starts on the second printed line of the page", 2, matches.get(0).line());
+            assertEquals("the attention mechanism is key", matches.get(0).snippet());
+        } finally {
+            Files.deleteIfExists(pdf);
+        }
+    }
+
+    @Test
+    public void testPlainTextHasNoPageBreaks() {
+        String text = extractor.extractTextFromBinary("line one\nline two".getBytes(StandardCharsets.UTF_8), "f.txt", "text/plain");
+        assertFalse(text.contains("\f"));
     }
 }

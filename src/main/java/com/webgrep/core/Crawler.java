@@ -2,22 +2,23 @@ package com.webgrep.core;
 
 import com.webgrep.config.CliOptions;
 import com.webgrep.reporting.CrawlResult;
+import com.webgrep.utils.ConsoleText;
 import com.webgrep.utils.UrlUtils;
+import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 import javax.net.ssl.*;
+import java.io.IOException;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -25,14 +26,19 @@ import java.util.stream.Collectors;
  *
  * <p>The crawler supports both breadth-first (default) and depth-first traversal, configurable
  * politeness delays, per-request body size limits, and automatic retry with exponential backoff
- * on HTTP 429 (Too Many Requests) responses. A session cookie jar is maintained across all
- * requests so that pages that set cookies (e.g. for session management) remain accessible.
+ * on HTTP 429 (Too Many Requests) responses. Cookies are kept in a {@link CookieJar} that
+ * follows browser rules, so pages that rely on a session stay accessible without a cookie ever
+ * reaching a host it was not meant for.
  *
  * <h2>Domain scoping rules</h2>
  * <ul>
  *   <li>If the seed URL starts with {@code www.}, all subdomains of the root domain are followed
  *       (e.g. seed {@code www.example.com} also follows {@code docs.example.com}).</li>
  *   <li>Otherwise, only the exact domain and its {@code www.} alias are followed.</li>
+ *   <li>If the seed itself redirects to another domain - a site that moved - the scope moves
+ *       with it.</li>
+ *   <li>Any other redirect that would leave the scope is not followed; it is listed in the
+ *       results instead.</li>
  *   <li>Use {@code --allow-external} to disable domain scoping entirely.</li>
  * </ul>
  *
@@ -53,8 +59,18 @@ public class Crawler {
     /** Characters cycled to draw the rotating progress spinner in the terminal. */
     private static final char[] SPINNER = {'|', '/', '-', '\\'};
 
-    /** Maximum number of retry attempts for a single URL on HTTP 429 (rate limit) responses. */
+    /** Maximum number of attempts for a single URL on HTTP 429 (rate limit) responses. */
     private static final int MAX_RETRIES = 3;
+
+    /** Maximum redirect hops followed for one URL; a longer chain is reported as an error. */
+    private static final int MAX_REDIRECTS = 20;
+
+    /**
+     * Upper bound on the number of URLs waiting in the queue. This guards memory on huge sites;
+     * it is not the page budget, which {@code --max-pages} sets. A link found while the queue is
+     * full is not lost for good: it is queued if found again later.
+     */
+    private static final int MAX_QUEUED_URLS = 100_000;
 
     /** HTTP status code for Forbidden - triggers a blocked entry, not a retry. */
     private static final int HTTP_FORBIDDEN = 403;
@@ -66,11 +82,10 @@ public class Crawler {
     private int spinnerIdx = 0;
 
     /**
-     * Per-host cookie store. Outer key is the hostname; inner map is {@code name → value}.
-     * Scoped by host so that cookies from site A are never sent to site B when
-     * {@code --allow-external} is active.
+     * Cookies received during the crawl, shared with the SPA renderer. Each request, including
+     * every redirect hop, sends only the cookies whose domain, path and Secure attributes allow it.
      */
-    private final Map<String, Map<String, String>> cookieJar = new HashMap<>();
+    private final CookieJar cookieJar = new CookieJar();
 
     /**
      * Three-state flag tracking whether the user has consented to SPA rendering.
@@ -124,6 +139,25 @@ public class Crawler {
     private final HostnameVerifier originalHostnameVerifier;
 
     /**
+     * Signals that a redirect would leave the crawl's domain scope and was not followed.
+     */
+    private static final class OffsiteRedirectException extends IOException {
+
+        /** The off-site URL the redirect pointed to. */
+        private final String target;
+
+        /**
+         * Creates the exception for a redirect that was not followed.
+         *
+         * @param target the off-site URL the redirect pointed to.
+         */
+        OffsiteRedirectException(String target) {
+            super("Redirect to another site: " + target);
+            this.target = target;
+        }
+    }
+
+    /**
      * Constructs a new {@code Crawler} from the given options and shared components.
      *
      * <p>Determines the starting domain and subdomain policy from the seed URL.
@@ -138,10 +172,7 @@ public class Crawler {
         this.options = options;
         this.extractor = extractor;
         this.matchEngine = matchEngine;
-        String startHost = extractHost(UrlUtils.normalizeUrl(options.getUrl(), null));
-        boolean seedHasWww = startHost.startsWith("www.");
-        this.startDomain = seedHasWww ? startHost.substring(4) : startHost;
-        this.allowSubdomains = seedHasWww;
+        switchScopeTo(extractHost(UrlUtils.normalizeUrl(options.getUrl(), null)));
         // Set Jsoup's cap one byte above the user limit so that a body truncated at exactly
         // maxBytes bytes is distinguishable from a legitimate response of that exact size.
         // The body-length check below uses > maxBytes (not >= maxBodySize) to detect truncation.
@@ -176,6 +207,18 @@ public class Crawler {
     }
 
     /**
+     * Sets the domain scope from a host: a {@code www.} host opens the scope to every subdomain
+     * of its root domain; any other host is followed together with its {@code www.} alias.
+     *
+     * @param host the lowercased host of the seed, or of the site the seed redirected to.
+     */
+    private void switchScopeTo(String host) {
+        boolean hasWww = host.startsWith("www.");
+        this.startDomain = hasWww ? host.substring(4) : host;
+        this.allowSubdomains = hasWww;
+    }
+
+    /**
      * Returns {@code true} if {@code linkHost} is within the allowed domain scope.
      *
      * <p>When {@link #allowSubdomains} is {@code true} (seed had {@code www.}), all subdomains
@@ -201,17 +244,19 @@ public class Crawler {
      *
      * <p>The crawl loop dequeues one {@link UrlDepth} at a time, fetches the URL, extracts
      * text and links, searches for the keyword, and enqueues newly discovered links. The loop
-     * terminates when the queue is empty, {@code --max-pages} is reached, or
-     * {@code --max-hits} is reached.
+     * terminates when the queue is empty, {@code --max-pages} pages have been visited, or
+     * {@code --max-hits} is reached. Only pages actually visited count towards
+     * {@code --max-pages}; a link that turns out to be broken does not use up the budget.
      *
      * <p>On each iteration:
      * <ol>
-     *   <li>The URL is fetched via {@link #fetchWithRetry}, which retries on HTTP 429.</li>
-     *   <li>Cookies from the response are stored in the jar.</li>
-     *   <li>The effective (post-redirect) URL is used as the canonical URL for this page.</li>
+     *   <li>The URL is fetched via {@link #fetch}, which follows redirects hop by hop and stops
+     *       at one that would leave the domain scope.</li>
+     *   <li>The final (post-redirect) URL is used as the canonical URL for this page.</li>
      *   <li>If it is an HTML page and looks like a SPA, {@link PlaywrightRenderer} is invoked.</li>
      *   <li>The extracted text is searched and results are stored in {@code crawlResult}.</li>
-     *   <li>Document links are enqueued unconditionally; navigation links only within depth.</li>
+     *   <li>A zero-delay {@code <meta http-equiv="refresh">} target is enqueued at the same depth,
+     *       document links regardless of depth, navigation links only within depth.</li>
      * </ol>
      *
      * <p>The {@link PlaywrightRenderer} is closed in a {@code finally} block, and the global
@@ -231,12 +276,14 @@ public class Crawler {
         try {
             while (!queue.isEmpty() && crawlResult.visitedCount < options.getMaxPages()) {
                 UrlDepth current = queue.pollFirst();
+                boolean isSeed = crawlResult.visitedCount == 0;
 
                 try {
                     if (crawlResult.visitedCount > 0) Thread.sleep(options.getDelayMs());
 
-                    org.jsoup.Connection.Response response = fetchWithRetry(current.url);
-                    storeCookies(response.url().toString(), response.cookies());
+                    // The seed may redirect anywhere: a site that moved to a new domain is still
+                    // the site the user asked for, and the scope moves with it below.
+                    Connection.Response response = fetch(current.url, options.isAllowExternal() || isSeed);
                     // Use the final URL after redirects as the canonical URL for this page.
                     // Normalise it so the dedup check below compares on the same canonical form.
                     String rawEffective = response.url().toString();
@@ -246,6 +293,7 @@ public class Crawler {
                         // Two queued URLs may redirect to the same target; skip content processing
                         // for the second arrival so matches are not double-counted.
                         if (dedup.isDuplicate(effectiveUrl)) {
+                            closeQuietly(response);
                             crawlResult.visitedCount++;
                             continue;
                         }
@@ -254,13 +302,11 @@ public class Crawler {
 
                     crawlResult.visitedCount++;
 
-                    // If the seed URL permanently redirected to a different domain (e.g. an old
-                    // domain that migrated), switch domain scoping to the destination domain so
-                    // links on the new domain are followed rather than silently discarded.
+                    // If the seed URL redirected to a different domain (e.g. an old domain that
+                    // migrated), switch domain scoping to the destination domain so links on the
+                    // new domain are followed rather than silently discarded.
                     if (crawlResult.visitedCount == 1 && !isSameDomain(extractHost(effectiveUrl))) {
-                        String newHost = extractHost(effectiveUrl);
-                        startDomain = newHost.startsWith("www.") ? newHost.substring(4) : newHost;
-                        allowSubdomains = newHost.startsWith("www.");
+                        switchScopeTo(extractHost(effectiveUrl));
                     }
 
                     String contentLengthHeader = response.header("Content-Length");
@@ -268,6 +314,7 @@ public class Crawler {
                         try {
                             long length = Long.parseLong(contentLengthHeader);
                             if (length > options.getMaxBytes()) {
+                                closeQuietly(response);
                                 crawlResult.incrementError(CrawlResult.ErrorType.SKIPPED_SIZE);
                                 continue;
                             }
@@ -288,6 +335,7 @@ public class Crawler {
                     // documents are leaves - they don't spawn further crawl levels.
                     List<String> navLinks = new ArrayList<>();
                     List<String> docLinksToEnqueue = new ArrayList<>();
+                    String refreshTarget = null;
 
                     if (contentType != null && (contentType.contains("text/html") || contentType.contains("application/xhtml+xml"))) {
                         Document doc;
@@ -316,13 +364,10 @@ public class Crawler {
                         }
 
                         // A zero-delay <meta http-equiv="refresh"> is an immediate navigation in
-                        // any browser, but Jsoup's followRedirects only covers HTTP 3xx. Such a
-                        // stub page carries no text and often no <a href> either, so without this
-                        // the crawl reports zero matches with nothing to explain why. Enqueued
-                        // depth-free because it is the same logical page, not a new crawl level;
-                        // the deduplicator stops refresh loops.
-                        String refreshTarget = metaRefreshTarget(doc, effectiveUrl);
-                        if (refreshTarget != null) docLinksToEnqueue.add(refreshTarget);
+                        // any browser, but redirect handling only covers HTTP 3xx. Such a stub
+                        // page carries no text and often no <a href> either, so without this the
+                        // crawl reports zero matches with nothing to explain why.
+                        refreshTarget = metaRefreshTarget(doc, effectiveUrl);
 
                         if (!Boolean.FALSE.equals(spaRenderingEnabled) && PlaywrightRenderer.isSpa(doc)) {
                             if (spaRenderingEnabled == null) {
@@ -332,10 +377,10 @@ public class Crawler {
                                 if (renderer == null) {
                                     renderer = new PlaywrightRenderer(options.getTimeoutMs(), options.isInsecure(), options.getBrowser());
                                 }
-                                PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookiesFor(effectiveUrl));
+                                PlaywrightRenderer.RenderedPage rendered = renderer.render(effectiveUrl, cookieJar.all());
                                 if (rendered != null) {
                                     content = rendered.text();
-                                    storeCookies(effectiveUrl, rendered.cookies());
+                                    rendered.cookies().forEach(cookieJar::add);
                                     // Rendered docLinks (JSON-intercepted + a[download] DOM links) bypass depth.
                                     rendered.docLinks().stream()
                                             .map(href -> UrlUtils.normalizeUrl(href, effectiveUrl))
@@ -364,13 +409,33 @@ public class Crawler {
                                 matchEngine.findSnippets(content, options.getKeyword(), options.getMode(), 3));
                     }
 
+                    if (refreshTarget != null) {
+                        boolean inScope = options.isAllowExternal() || isSameDomain(extractHost(refreshTarget));
+                        if (!inScope && crawlResult.visitedCount == 1) {
+                            // A seed page that immediately sends the browser to another site is a
+                            // redirect like an HTTP one, so the scope moves with it.
+                            switchScopeTo(extractHost(refreshTarget));
+                            inScope = true;
+                        }
+                        if (!inScope) {
+                            crawlResult.addOffsiteRedirect(effectiveUrl, refreshTarget);
+                        } else if (!dedup.isDuplicate(refreshTarget) && queue.size() < MAX_QUEUED_URLS) {
+                            dedup.markQueued(refreshTarget);
+                            // Queued at the current depth, not one level down: the target is the
+                            // page a browser would show here, so its links are this page's links.
+                            UrlDepth target = new UrlDepth(refreshTarget, current.depth);
+                            if (options.isDfs()) queue.addFirst(target);
+                            else queue.addLast(target);
+                        }
+                    }
+
                     // Enqueue document links regardless of depth (documents are search targets,
                     // not new crawl levels - they don't multiply the frontier exponentially).
                     for (String docLink : docLinksToEnqueue) {
                         if (!options.isAllowExternal()) {
                             if (!isSameDomain(extractHost(docLink))) continue;
                         }
-                        if (!dedup.isDuplicate(docLink) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
+                        if (!dedup.isDuplicate(docLink) && queue.size() < MAX_QUEUED_URLS) {
                             dedup.markQueued(docLink);
                             queue.addLast(new UrlDepth(docLink, current.depth + 1));
                         }
@@ -386,7 +451,7 @@ public class Crawler {
                                 }
                             }
 
-                            if (!dedup.isDuplicate(link) && crawlResult.visitedCount + queue.size() < options.getMaxPages()) {
+                            if (!dedup.isDuplicate(link) && queue.size() < MAX_QUEUED_URLS) {
                                 dedup.markQueued(link);
                                 if (options.isDfs()) {
                                     queue.addFirst(new UrlDepth(link, current.depth + 1));
@@ -397,7 +462,9 @@ public class Crawler {
                         }
                     }
 
-                } catch (org.jsoup.HttpStatusException e) {
+                } catch (OffsiteRedirectException e) {
+                    crawlResult.addOffsiteRedirect(current.url, e.target);
+                } catch (HttpStatusException e) {
                     if (e.getStatusCode() == HTTP_FORBIDDEN || e.getStatusCode() == HTTP_TOO_MANY_REQUESTS) {
                         crawlResult.addBlocked(current.url, "HTTP " + e.getStatusCode() + " (Access Denied/Rate Limited)");
                     } else {
@@ -430,51 +497,112 @@ public class Crawler {
     }
 
     /**
-     * Fetches a URL with up to {@link #MAX_RETRIES} retry attempts on HTTP 429 (rate limit).
+     * Fetches a URL, following redirects one hop at a time.
+     *
+     * <p>Redirects are followed here rather than by Jsoup for two reasons. Each hop is a new
+     * request whose {@code Cookie} header the {@link CookieJar} builds for that hop's own URL,
+     * so a session cookie for one host is never carried along to the next. And each hop's
+     * target is checked against the domain scope before anything is sent to it.
+     *
+     * @param url          the URL to fetch.
+     * @param allowOffsite whether a redirect may leave the domain scope - true for the seed and
+     *                     under {@code --allow-external}.
+     * @return the final, non-redirect response (status below 400).
+     * @throws OffsiteRedirectException if a redirect would leave the scope and that is not allowed.
+     * @throws Exception on network errors, HTTP errors, or more than {@link #MAX_REDIRECTS} hops.
+     */
+    private Connection.Response fetch(String url, boolean allowOffsite) throws Exception {
+        String current = url;
+        for (int hops = 0; ; hops++) {
+            Connection.Response response = fetchWithRetry(current);
+            String target = redirectTarget(response, current);
+            if (target == null) return response;
+            closeQuietly(response);
+            if (hops >= MAX_REDIRECTS) throw new IOException("Too many redirects");
+            if (!allowOffsite && !isSameDomain(extractHost(target))) throw new OffsiteRedirectException(target);
+            current = target;
+        }
+    }
+
+    /**
+     * Returns where a response redirects to, or {@code null} if it is not a redirect.
+     *
+     * @param response the response to inspect.
+     * @param url      the URL it was fetched from, for resolving a relative {@code Location}.
+     * @return the normalised absolute target URL, or {@code null} for a non-redirect response
+     *         (including a 3xx without a {@code Location} header).
+     * @throws IOException if the target is not an http(s) URL.
+     */
+    private static String redirectTarget(Connection.Response response, String url) throws IOException {
+        int status = response.statusCode();
+        if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) return null;
+        String location = response.header("Location");
+        if (location == null || location.isBlank()) return null;
+        String target = UrlUtils.normalizeUrl(location, url);
+        if (target.isEmpty()) throw new IOException("Unsupported redirect target");
+        return target;
+    }
+
+    /**
+     * Releases the connection behind a response whose body will not be read.
+     *
+     * @param response the response to discard.
+     */
+    private static void closeQuietly(Connection.Response response) {
+        try {
+            response.bodyStream().close();
+        } catch (Exception ignored) {
+            // No body, or already read and closed.
+        }
+    }
+
+    /**
+     * Makes one request, retrying up to {@link #MAX_RETRIES} times in total on HTTP 429.
      *
      * <p>On HTTP 429, the crawler waits before retrying. The wait time is taken from the
      * {@code Retry-After} response header if present (interpreted as integer seconds, capped at
      * 60 seconds), otherwise exponential backoff is used: 2 seconds before retry 1, 4 seconds
-     * before retry 2. Non-429 HTTP errors (4xx, 5xx) are thrown immediately as
-     * {@link org.jsoup.HttpStatusException}.
+     * before retry 2. Other HTTP errors (4xx, 5xx) are thrown immediately as
+     * {@link HttpStatusException}.
      *
-     * <p>All requests use the session cookie jar, follow redirects, and carry browser-like
-     * headers ({@code User-Agent}, {@code Accept}, {@code Accept-Language}) to avoid being
-     * blocked by basic bot-detection.
+     * <p>Every response's {@code Set-Cookie} headers go into the {@link CookieJar}, error and
+     * redirect responses included (some challenge flows set a cookie on a 429 that must be sent
+     * back on the retry). Redirects are not followed here; see {@link #fetch}. All requests carry
+     * browser-like headers ({@code User-Agent}, {@code Accept}, {@code Accept-Language}) to avoid
+     * being blocked by basic bot-detection.
      *
      * @param url the URL to fetch.
-     * @return the successful Jsoup response (status &lt; 400).
+     * @return the response (status below 400; may be a redirect).
      * @throws Exception on network errors, non-retryable HTTP errors, or exhausted retries.
      */
-    private org.jsoup.Connection.Response fetchWithRetry(String url) throws Exception {
+    private Connection.Response fetchWithRetry(String url) throws Exception {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            org.jsoup.Connection conn = Jsoup.connect(url)
+            Connection conn = Jsoup.connect(url)
                     .timeout(options.getTimeoutMs())
                     .maxBodySize(maxBodySize)
-                    .followRedirects(true)
+                    .followRedirects(false)
                     .ignoreContentType(true)
                     .ignoreHttpErrors(true) // so we can read Retry-After before deciding to retry
-                    .cookies(cookiesFor(url))
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                     .header("Accept-Language", "en-US,en;q=0.9,bs;q=0.8,sr;q=0.7,hr;q=0.6")
                     .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+            String cookieHeader = cookieJar.header(url);
+            if (cookieHeader != null) conn.header("Cookie", cookieHeader);
             if (insecureSslFactory != null) conn.sslSocketFactory(insecureSslFactory);
-            org.jsoup.Connection.Response response = conn.execute();
+            Connection.Response response = conn.execute();
+            cookieJar.store(url, response.headers("Set-Cookie"));
             int status = response.statusCode();
 
             if (status == HTTP_TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
-                // Store any cookies the server sent on the 429 (some challenge flows set
-                // a session cookie that must be echoed back on the retry request).
-                storeCookies(url, response.cookies());
                 long waitMs = parseRetryAfter(response.header("Retry-After"), 1000L << attempt);
+                closeQuietly(response);
                 System.err.printf("\r%-110s",
                         "  ⏸  Rate limited - waiting " + (waitMs / 1000) + "s before retry "
-                        + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + url);
+                        + attempt + "/" + (MAX_RETRIES - 1) + "  |  " + ConsoleText.safe(url));
                 Thread.sleep(waitMs);
             } else if (status >= 400) {
-                // Preserve cookies from error responses (e.g. session tokens set during 401 challenges)
-                storeCookies(url, response.cookies());
-                throw new org.jsoup.HttpStatusException("HTTP error fetching URL", status, url);
+                closeQuietly(response);
+                throw new HttpStatusException("HTTP error fetching URL", status, url);
             } else {
                 return response;
             }
@@ -598,7 +726,7 @@ public class Crawler {
         }
 
         System.err.println();
-        System.err.println("  The page at " + url);
+        System.err.println("  The page at " + ConsoleText.safe(url));
         System.err.println("  is a JavaScript-rendered single-page application (Angular, React, or Vue).");
         System.err.println("  Its content is not visible in a plain HTML fetch and will return no results");
         System.err.println("  without a headless browser.");
@@ -623,81 +751,22 @@ public class Crawler {
     }
 
     /**
-     * Returns the cookies that should be sent with a request to the given URL.
-     *
-     * <p>Looks up the cookie jar by the hostname extracted from {@code url}. If no cookies
-     * have been set for that host, returns an empty map.
-     *
-     * <p>Package-private (not private) so that unit tests can verify cookie scoping directly.
-     *
-     * @param url the URL to retrieve cookies for.
-     * @return the cookie map for that host; never {@code null}.
-     */
-    Map<String, String> cookiesFor(String url) {
-        String host = extractHost(url);
-        Map<String, String> hostJar = cookieJar.getOrDefault(host, Map.of());
-        // Subdomain merging only applies when the *target* host is itself inside the seed's
-        // root domain. Without that check, an --allow-external hop to an unrelated site would
-        // be sent the seed domain's session cookies.
-        if (!allowSubdomains || !isWithinStartDomain(host)) {
-            return hostJar;
-        }
-        // Seed was www.*: merge cookies from every host under the same root domain so session
-        // tokens set on one subdomain are sent to the others.
-        Map<String, String> merged = new HashMap<>();
-        cookieJar.forEach((h, jar) -> {
-            if (isWithinStartDomain(h)) merged.putAll(jar);
-        });
-        // Host-specific cookies win over broader domain cookies.
-        merged.putAll(hostJar);
-        return merged.isEmpty() ? Map.of() : Collections.unmodifiableMap(merged);
-    }
-
-    /**
-     * Returns {@code true} if {@code host} is {@link #startDomain} itself or one of its
-     * subdomains. Used to scope cookie sharing to the seed's root domain.
-     *
-     * @param host a lowercased hostname.
-     * @return {@code true} if the host belongs to the seed's root domain.
-     */
-    private boolean isWithinStartDomain(String host) {
-        return host.equals(startDomain) || host.endsWith("." + startDomain);
-    }
-
-    /**
-     * Stores the cookies from an HTTP response into the cookie jar, scoped by hostname.
-     *
-     * <p>Cookies are merged (not replaced) so that a new response adds to existing cookies
-     * rather than overwriting the whole jar for a host.
-     *
-     * <p>Package-private (not private) so that unit tests can seed the jar before asserting
-     * on {@link #cookiesFor(String)}.
-     *
-     * @param url     the URL the response came from; the hostname is used as the jar key.
-     * @param cookies the {@code name → value} cookie map from the response.
-     */
-    void storeCookies(String url, Map<String, String> cookies) {
-        if (cookies.isEmpty()) return;
-        String host = extractHost(url);
-        if (host.isEmpty()) return;
-        cookieJar.computeIfAbsent(host, k -> new HashMap<>()).putAll(cookies);
-    }
-
-    /**
      * Writes a single-line progress indicator to stderr, overwriting the previous line.
      *
      * <p>Uses {@code \r} (carriage return) to stay on the same terminal line so the crawl
      * output doesn't scroll. The line is padded to 110 characters to ensure the previous
      * content is fully erased when shorter URLs replace longer ones.
      *
-     * <p>Written to stderr so that JSON output on stdout is not contaminated.
+     * <p>Written to stderr so that JSON output on stdout is not contaminated. The URL is
+     * escaped with {@link ConsoleText#safe} before printing.
      *
      * @param currentUrl the URL currently being processed (truncated to 60 chars if long).
      * @param visited    the number of pages visited so far.
      * @param matches    the total number of keyword matches found so far.
      */
     private void printProgress(String currentUrl, int visited, int matches) {
-        String truncated = currentUrl.length() > 60 ? currentUrl.substring(0, 57) + "..." : currentUrl;
+        String url = ConsoleText.safe(currentUrl);
+        String truncated = url.length() > 60 ? url.substring(0, 57) + "..." : url;
         String line = String.format("%c  %d pages visited  |  %d matches found  |  %s",
                 SPINNER[spinnerIdx++ % SPINNER.length], visited, matches, truncated);
         System.err.printf("\r%-110s", line);

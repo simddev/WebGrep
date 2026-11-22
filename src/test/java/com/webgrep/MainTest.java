@@ -363,7 +363,7 @@ public class MainTest {
     @Test
     public void testFindLineMatchesWithPages() {
         MatchEngine engine = new MatchEngine();
-        // \f is Tika's page separator
+        // \f separates pages in extracted document text
         String text = "intro line\nfox on page one\f\nno match\nfox on page two";
         List<FileMatch> matches = Main.findLineMatches(text, "fox", "default", engine);
 
@@ -371,7 +371,9 @@ public class MainTest {
         assertEquals(1, matches.get(0).page());
         assertEquals(2, matches.get(0).line());
         assertEquals(2, matches.get(1).page());
-        assertEquals(3, matches.get(1).line());
+        // In paged documents blank lines are layout artifacts and do not count: the blank line
+        // that opens page 2 is skipped, so "fox on page two" is the page's second line.
+        assertEquals(2, matches.get(1).line());
     }
 
     @Test
@@ -794,36 +796,62 @@ public class MainTest {
 
     @Test
     public void testFolderScanSkipsSymlinks() throws Exception {
-        // v1.1.3: symlinks must be excluded from the folder scan
+        // Symlinks are excluded from the folder scan, so a file is never searched twice.
         java.nio.file.Path tmp = java.nio.file.Files.createTempDirectory("webgrep-symlink-test");
         try {
             java.nio.file.Path real = tmp.resolve("real.txt");
             java.nio.file.Files.writeString(real, "keyword found here");
-            // Symlink pointing at the real file - should NOT be scanned as a second copy
-            java.nio.file.Path link = tmp.resolve("link.txt");
-            java.nio.file.Files.createSymbolicLink(link, real);
+            java.nio.file.Files.createSymbolicLink(tmp.resolve("link.txt"), real);
 
-            MatchEngine engine = new MatchEngine();
-            com.webgrep.core.ContentExtractor extractor =
-                    new com.webgrep.core.ContentExtractor(10 * 1024 * 1024);
-
-            // Walk the directory: only real.txt should be seen, not link.txt
-            java.util.List<java.nio.file.Path> files;
-            try (var stream = java.nio.file.Files.walk(tmp)) {
-                files = stream
-                        .filter(p -> java.nio.file.Files.isRegularFile(p)
-                                && !java.nio.file.Files.isSymbolicLink(p))
-                        .sorted()
-                        .toList();
-            }
-            assertEquals("Only one non-symlink file should be scanned", 1, files.size());
-            assertEquals(real, files.get(0));
+            List<java.nio.file.Path> files = Main.listFiles(tmp);
+            assertEquals("Only the real file may be listed", List.of(real), files);
         } finally {
-            // cleanup
-            try (var s = java.nio.file.Files.walk(tmp)) {
-                s.sorted(java.util.Comparator.reverseOrder())
-                 .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
+            deleteTree(tmp);
+        }
+    }
+
+    @Test
+    public void testFolderScanSkipsNamedPipes() throws Exception {
+        // Reading a named pipe blocks until something writes to it; listing one would hang the scan.
+        java.nio.file.Path tmp = java.nio.file.Files.createTempDirectory("webgrep-fifo-test");
+        try {
+            java.nio.file.Path real = tmp.resolve("a.txt");
+            java.nio.file.Files.writeString(real, "fox");
+            java.nio.file.Path fifo = tmp.resolve("pipe");
+            boolean made;
+            try {
+                made = new ProcessBuilder("mkfifo", fifo.toString()).start().waitFor() == 0;
+            } catch (java.io.IOException e) {
+                made = false;
             }
+            org.junit.Assume.assumeTrue("mkfifo is not available on this system", made);
+
+            assertEquals(List.of(real), Main.listFiles(tmp));
+        } finally {
+            deleteTree(tmp);
+        }
+    }
+
+    @Test
+    public void testFolderScanFollowsSymlinkedRootFolder() throws Exception {
+        // The folder given on the command line may itself be a link; its contents are scanned,
+        // and reported under the path the user typed.
+        java.nio.file.Path tmp = java.nio.file.Files.createTempDirectory("webgrep-rootlink-test");
+        try {
+            java.nio.file.Path realDir = java.nio.file.Files.createDirectory(tmp.resolve("real"));
+            java.nio.file.Files.writeString(realDir.resolve("a.txt"), "fox");
+            java.nio.file.Path link = java.nio.file.Files.createSymbolicLink(tmp.resolve("link"), realDir);
+
+            assertEquals(List.of(link.resolve("a.txt")), Main.listFiles(link));
+        } finally {
+            deleteTree(tmp);
+        }
+    }
+
+    private static void deleteTree(java.nio.file.Path root) throws Exception {
+        try (var s = java.nio.file.Files.walk(root)) {
+            s.sorted(java.util.Comparator.reverseOrder())
+             .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
         }
     }
 
@@ -1089,11 +1117,17 @@ public class MainTest {
     }
 
     @Test
-    public void testFuzzyModeStillMatchesAcrossWordBoundaries() {
+    public void testFuzzyModeDoesNotMatchAcrossWhitespace() {
         MatchEngine engine = new MatchEngine();
-        // Fuzzy mode intentionally strips spaces so "sofa" CAN match "so far away"
-        // (space-stripped text is "sofaraway"). This is expected fuzzy behaviour.
-        assertTrue(engine.countMatches("so far away", "sofa", "fuzzy") > 0);
+        // Fuzzy mode ignores punctuation inside words, but a space in the text is still a
+        // word boundary: "sofa" must not match "so far away".
+        assertEquals(0, engine.countMatches("so far away", "sofa", "fuzzy"));
+        assertTrue(engine.findSnippets("so far away", "sofa", "fuzzy", 3).isEmpty());
+        // Punctuation is still bridged in both directions.
+        assertEquals(1, engine.countMatches("the node.js runtime", "nodejs", "fuzzy"));
+        assertEquals(1, engine.countMatches("the nodejs runtime", "node.js", "fuzzy"));
+        // A keyword written with a space may match the words written together.
+        assertEquals(1, engine.countMatches("a realtime system", "real time", "fuzzy"));
     }
 
     // ── multi-word keyword across newline (Tika PDF text) ────────────────────
@@ -1148,5 +1182,143 @@ public class MainTest {
         // timeout 0 means infinite timeout in Jsoup; must be rejected.
         CliOptions options = CliOptions.parse(new String[]{"-u", "http://example.com", "-k", "test", "-t", "0"});
         options.validate();
+    }
+
+    // ── phrases across line breaks, snippets around the match ─────────────────
+
+    @Test
+    public void testFindLineMatchesPhraseAcrossLineBreak() {
+        // Document text breaks lines wherever the printed line ends; a phrase split there must
+        // still be found, and reported on the line where it starts.
+        MatchEngine engine = new MatchEngine();
+        List<FileMatch> matches = Main.findLineMatches("intro\nthe attention\nmechanism is key\n",
+                "attention mechanism", "default", engine);
+        assertEquals(1, matches.size());
+        assertEquals(2, matches.get(0).line());
+        assertEquals("the attention mechanism is key", matches.get(0).snippet());
+    }
+
+    @Test
+    public void testPhraseWithPunctuationMatchesAcrossLineBreak() {
+        MatchEngine engine = new MatchEngine();
+        assertEquals(1, engine.countMatches("learn node.js\ntutorial here", "node.js tutorial", "default"));
+        assertEquals(1, Main.findLineMatches("learn node.js\ntutorial here", "node.js tutorial", "default", engine).size());
+        // Exact mode is case-sensitive, but whitespace runs still match whitespace runs.
+        assertEquals(1, engine.countMatches("Clause 4.2\n  applies", "Clause 4.2 applies", "exact"));
+        assertEquals(0, engine.countMatches("clause 4.2\n  applies", "Clause 4.2 applies", "exact"));
+    }
+
+    @Test
+    public void testLongLineSnippetShowsTheMatch() {
+        MatchEngine engine = new MatchEngine();
+        String line = "x".repeat(250) + " zebra " + "y".repeat(50);
+        List<FileMatch> matches = Main.findLineMatches(line, "zebra", "default", engine);
+        assertEquals(1, matches.size());
+        String snippet = matches.get(0).snippet();
+        assertTrue("Snippet must show the match: " + snippet, snippet.contains("zebra"));
+        assertTrue(snippet.length() <= 120);
+        assertTrue(snippet.startsWith("..."));
+
+        String middle = "x".repeat(300) + " zebra " + "y".repeat(300);
+        String cut = Main.findLineMatches(middle, "zebra", "default", engine).get(0).snippet();
+        assertTrue(cut, cut.contains("zebra") && cut.startsWith("...") && cut.endsWith("..."));
+        assertEquals(120, cut.length());
+    }
+
+    @Test
+    public void testFuzzyTypoMatchesAreStillFoundLineByLine() {
+        // A line keeps its typo matches even when another line of the same page has an exact one.
+        MatchEngine engine = new MatchEngine();
+        List<FileMatch> matches = Main.findLineMatches("a kitten here\nand a kiten there", "kitten", "fuzzy", engine);
+        assertEquals(2, matches.size());
+        assertEquals(1, matches.get(0).line());
+        assertEquals(2, matches.get(1).line());
+    }
+
+    @Test
+    public void testFuzzyTypoMatchesProduceSnippets() {
+        MatchEngine engine = new MatchEngine();
+        assertEquals(1, engine.countMatches("The kiten sat on the mat", "kitten", "fuzzy"));
+        List<String> snippets = engine.findSnippets("The kiten sat on the mat", "kitten", "fuzzy", 3);
+        assertEquals(List.of("The kiten sat on the mat"), snippets);
+    }
+
+    @Test
+    public void testSnippetInTextWithoutSpacesShowsTheMatch() {
+        // Chinese and Japanese text has no spaces to snap snippet edges to.
+        MatchEngine engine = new MatchEngine();
+        String text = "あ".repeat(1000) + "東京" + "い".repeat(1000);
+        List<String> snippets = engine.findSnippets(text, "東京", "default", 3);
+        assertEquals(1, snippets.size());
+        assertTrue(snippets.get(0).contains("東京"));
+        assertTrue(snippets.get(0).length() < 200);
+    }
+
+    @Test
+    public void testFindMatchesReportsPositionsAndAgreesWithCount() {
+        MatchEngine engine = new MatchEngine();
+        String text = "Café and cafe, then CAFE";
+        List<MatchEngine.Match> found = engine.findMatches(text, "cafe", "default");
+        assertEquals(engine.countMatches(text, "cafe", "default"), found.size());
+        assertEquals(3, found.size());
+        assertEquals("Café", text.substring(found.get(0).start(), found.get(0).end()));
+        assertEquals("CAFE", text.substring(found.get(2).start(), found.get(2).end()));
+    }
+
+    // ── CLI parsing ───────────────────────────────────────────────────────────
+
+    @Test
+    public void testUppercaseUrlSchemeIsAccepted() {
+        CliOptions.parse(new String[]{"-u", "HTTPS://example.com", "-k", "x"}).validate();
+        CliOptions.parse(new String[]{"-u", "Http://example.com", "-k", "x"}).validate();
+    }
+
+    @Test
+    public void testAttachedValueMayStartWithDash() {
+        CliOptions options = CliOptions.parse(new String[]{"-f", "/tmp/f.txt", "--keyword=--force"});
+        assertEquals("--force", options.getKeyword());
+        assertEquals(3, CliOptions.parse(new String[]{"-u", "example.com", "-k", "x", "--depth=3"}).getDepth());
+    }
+
+    @Test
+    public void testAttachedValueOnBooleanFlagIsRejected() {
+        try {
+            CliOptions.parse(new String[]{"-u", "example.com", "-k", "x", "--dfs=true"});
+            fail("Expected rejection");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("does not take a value"));
+        }
+    }
+
+    @Test
+    public void testMissingValueErrorSuggestsAttachedForm() {
+        try {
+            CliOptions.parse(new String[]{"-f", "/tmp/f.txt", "-k", "--force"});
+            fail("Expected rejection");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("--keyword=VALUE"));
+        }
+    }
+
+    // ── terminal safety ───────────────────────────────────────────────────────
+
+    @Test
+    public void testNormalizeUrlHandlesControlCharacters() {
+        // Tabs and newlines inside a URL are removed, as browsers do; other control characters
+        // are percent-encoded, so no URL can carry an escape sequence to the terminal.
+        assertEquals("http://example.com/a/b", UrlUtils.normalizeUrl("/a/\nb", "http://example.com/"));
+        assertEquals("http://example.com/path", UrlUtils.normalizeUrl("  http://example.com/path\t ", null));
+        assertEquals("http://example.com/x%1B%5D0;t%07end", UrlUtils.normalizeUrl("/x\u001b%5D0;t\u0007end", "http://example.com/"));
+        // Leading and trailing control characters are trimmed rather than encoded.
+        assertEquals("http://example.com/x", UrlUtils.normalizeUrl("\u0007/x\u001b", "http://example.com/"));
+        assertEquals("http://example.com/c%C2%9B", UrlUtils.normalizeUrl("/c\u009b", "http://example.com/"));
+    }
+
+    @Test
+    public void testConsoleTextEscapesControlCharacters() {
+        assertEquals("plain text, café", com.webgrep.utils.ConsoleText.safe("plain text, café"));
+        assertEquals("name\\x1B]0;title\\x07.txt", com.webgrep.utils.ConsoleText.safe("name\u001b]0;title\u0007.txt"));
+        assertEquals("a\\x9Bb", com.webgrep.utils.ConsoleText.safe("a\u009bb"));
+        assertEquals("", com.webgrep.utils.ConsoleText.safe(null));
     }
 }

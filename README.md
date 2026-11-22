@@ -1,6 +1,6 @@
 # WebGrep
 
-WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website and its linked documents), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes use Apache Tika for text extraction from **PDF, DOCX, TXT, and 100+ other formats**, and report exact page and line numbers for every match.
+WebGrep is a high-performance CLI keyword search tool with three modes: **web crawl** (recursively search a website and its linked documents), **local file** (search a single file offline), and **local folder** (recursively search all files in a directory). All modes use Apache Tika for text extraction from **PDF, DOCX, TXT, and 100+ other formats**. File and folder searches report the line - and for PDFs the page - of every match.
 
 **Tech stack:** Java 17+, Maven, [Jsoup](https://jsoup.org/) (HTML fetching/parsing), [Apache Tika](https://tika.apache.org/) (document text extraction), [Playwright for Java](https://playwright.dev/java/) (JavaScript rendering for SPA pages), JUnit 4 (tests).
 
@@ -31,7 +31,7 @@ docker run --rm -v /path/to/file.pdf:/data/file.pdf webgrep -f /data/file.pdf -k
 docker run --rm -v /path/to/documents:/data webgrep -F /data -k confidential
 ```
 
-The Docker image uses a multi-stage build - Maven compiles the JAR in the build stage, only the lightweight Alpine JRE is included in the final image (~90 MB).
+The Docker image uses a multi-stage build - Maven compiles the JAR in the build stage, and the final image contains only the Alpine JRE and the JAR, running as an unprivileged user. Expect a large image: the JAR alone is over 250 MB, because it bundles Tika's 100+ format parsers and Playwright's browser driver for every platform.
 
 > **SPA rendering in Docker**: The Docker image does not include a headless browser. JavaScript-rendered SPA pages cannot be crawled from within the container. For SPA support, use the JAR directly and run `--install-browser` once to set up a browser on the host.
 
@@ -60,17 +60,17 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 - `-F, --folder <path>`: Recursively search all files in a local directory. Results are grouped by file.
 
 **Matching:**
-- `-k, --keyword <word>`: The keyword to search for (required).
+- `-k, --keyword <word>`: The keyword to search for (required). A keyword that starts with `-` is written attached: `--keyword=--force`.
 - `-m, --mode <mode>`: Match strategy: `default`, `exact`, or `fuzzy`.
 
 **Web crawl controls:**
 - `-d, --depth <n>`: Maximum crawl depth (default: 1). See [Depth Definition](#depth-definition) below.
-- `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000).
+- `-p, --max-pages <n>`: Stop after visiting N pages (default: 5000). Links that turn out to be broken do not count.
 - `-t, --timeout-ms <n>`: Network timeout per request in milliseconds (default: 20000).
 - `-r, --delay-ms <n>`: Delay between requests in milliseconds (default: 100).
-- `-a, --all-urls`: Disable smart URL deduplication. By default, `page?id=1&sort=asc` is treated as a variant of `page?id=1` and skipped. Use this flag to visit every URL regardless.
+- `-a, --all-urls`: Disable smart URL deduplication. By default, URLs that differ only in tracking, session or sort-order parameters (`page?id=1&sort=asc`, `page?id=1&utm_source=mail`) are treated as the same page. Use this flag to visit every URL regardless.
 - `-s, --dfs`: Use depth-first search instead of the default breadth-first. BFS covers the site level by level; DFS follows each link chain as deep as possible before backtracking.
-- `-e, --allow-external`: Follow links outside the starting domain.
+- `-e, --allow-external`: Follow links and redirects outside the starting domain. Without it, a redirect to another site is not followed but listed in the results.
 - `-i, --insecure`: Disable SSL certificate verification. Use with caution.
 
 **SPA rendering:**
@@ -85,9 +85,11 @@ java -jar WebGrep.jar -F <path> -k <keyword> [options]
 
 ### Matching Modes
 
-- **Default**: Case-insensitive with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`. Both a case-insensitive regex pass and a diacritic-stripped, punctuation-removed pass run; the higher match count is returned. This ensures mixed text like `"cafe Café"` counts both variants rather than only one. (The diacritic-stripped pass is skipped for keywords that contain ASCII special characters such as `node.js`, `.NET`, or `C++`, since stripping punctuation would change the intended search term.)
+- **Default**: Case-insensitive with Unicode and diacritic support. `cafe` matches `Café`, `CAFE`, `café`, and `real time` matches `real-time`. Both a case-insensitive literal pass and a diacritic-stripped pass (punctuation read as a space) run, so mixed text like `"cafe Café"` counts both variants rather than only one. (The diacritic-stripped pass is skipped for keywords that contain ASCII special characters such as `node.js`, `.NET`, or `C++`, since stripping punctuation would change the intended search term.)
 - **Exact**: Strict case-sensitive literal match. `hello` does not match `Hello`.
-- **Fuzzy**: First tries a normalised substring match. If that fails, splits the text into words and accepts any word within Levenshtein edit distance 1 (for keywords ≤ 4 characters) or 2 (for longer keywords). Catches common typos and spelling variants.
+- **Fuzzy**: First looks for the keyword with case, diacritics and punctuation inside words ignored - `node.js` finds `nodejs` - while a space in the text still separates words, so `sofa` does not match `so far`. If that finds nothing, accepts any word within Levenshtein edit distance 1 (for keywords ≤ 4 characters) or 2 (for longer keywords). Catches common typos and spelling variants.
+
+In every mode, a space in the keyword matches any run of whitespace in the text, so a phrase is found even where the text breaks it across two lines - which PDF text does at the end of every printed line.
 
 ### Depth Definition
 
@@ -97,7 +99,9 @@ Applies to web crawl mode only.
 - **Depth 1**: Fetches the seed URL, then follows all links found on that page.
 - **Depth N**: Continues recursively, following links up to N hops from the seed.
 
-Each URL is visited at most once per run. By default, URLs that look like navigation variants of an already-visited page are skipped - `list?id=1&sort=asc` is treated as a variant of `list?id=1`, but `list?id=2` is treated as new content. Use `--all-urls` to disable this.
+Each URL is visited at most once per run. By default, URLs that differ only in parameters that never change a page's content - tracking (`utm_*`, `fbclid`, ...), session IDs, sort order - are treated as the same page: `list?id=1&sort=asc` is a variant of `list?id=1`. Every other parameter is treated as new content, so `list?id=2` and `list?id=1&page=2` are both visited. Use `--all-urls` to disable this.
+
+A page whose `<meta http-equiv="refresh">` sends the browser on immediately counts as the page it redirects to, so a site whose front page is such a redirect is crawled to the full depth.
 
 ---
 
@@ -124,22 +128,25 @@ Answer **Y** (or just press Enter) to enable rendering. The choice applies for t
 
 ### How the Browser Is Selected
 
-WebGrep works through the following tiers in order, using the first option that succeeds:
+WebGrep works through the following tiers in order, using the first browser that starts:
 
 1. **System Chromium or Chrome** - if already installed on your machine, WebGrep uses it silently. No download required.
-2. **System Firefox** - used if found. Note: Firefox Developer Edition and Nightly may be incompatible with Playwright's protocol; WebGrep falls through to the next tier silently if they fail.
-3. **Previously downloaded Playwright Firefox** - if you've run WebGrep with SPA rendering before, the cached Firefox build is reused automatically.
-4. **Previously downloaded Playwright Chromium** - same as above for Chromium.
-5. **First-time download** - if no browser is available, WebGrep prompts you to choose Firefox (Mozilla Foundation, ~105 MB, default) or Chromium (Google, ~120 MB). The browser is downloaded once to `~/.cache/ms-playwright` and reused on all future runs.
+2. **Playwright Firefox** - a Firefox build previously downloaded for WebGrep, or one already in the shared Playwright cache.
+3. **Playwright Chromium** - the same, for Chromium.
+4. **First-time download** - if no browser is available, WebGrep prompts you to choose Firefox (Mozilla Foundation, ~105 MB, default) or Chromium (Google, ~120 MB). The browser is downloaded once and reused on all future runs.
 
-Use `--browser firefox` or `--browser chromium` to skip to a specific tier. `--browser auto` (the default) always tries the above order.
+An installed Firefox is not used: Playwright can only drive its own patched Firefox build, so WebGrep downloads that build instead.
+
+Browsers WebGrep downloads go into a folder of its own - `~/.cache/webgrep/browsers` on Linux (respecting `XDG_CACHE_HOME`), `~/Library/Caches/webgrep/browsers` on macOS, `%LOCALAPPDATA%\webgrep\browsers` on Windows. Playwright's shared cache (`~/.cache/ms-playwright`) is cleaned out whenever any other program installs a Playwright browser, which would delete WebGrep's. Set `PLAYWRIGHT_BROWSERS_PATH` to use a folder of your choice instead.
+
+Use `--browser firefox` or `--browser chromium` to skip the other browser's tiers. `--browser auto` (the default) always tries the above order.
 
 ### Pre-installing a Browser
 
 To avoid the interactive prompt - for example, before running WebGrep in a script or CI pipeline - install a browser upfront with `--install-browser`:
 
 ```bash
-# Let WebGrep pick (checks for system browsers first, prompts if none found)
+# Let WebGrep pick (checks for a usable browser first, prompts if none found)
 java -jar WebGrep.jar --install-browser
 
 # Force a specific browser
@@ -147,7 +154,7 @@ java -jar WebGrep.jar --install-browser --browser firefox
 java -jar WebGrep.jar --install-browser --browser chromium
 ```
 
-If a compatible system browser is already installed, this command reports it and exits without downloading anything.
+If a usable browser is already present, this command reports it and exits without downloading anything. "Usable" is checked by starting the browser, not just by looking for its files.
 
 ### Additional Details
 
@@ -256,7 +263,7 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 
 **Web crawl mode:** static assets (images, video, CSS, JS, fonts, archives, social share links) are filtered by URL before any request is made.
 
-**File and folder modes:** every file is passed to Tika regardless of extension. Files exceeding `--max-bytes` are skipped and counted in the summary.
+**File and folder modes:** every file is passed to Tika regardless of extension. Files exceeding `--max-bytes` are skipped and counted in the summary. Folder scans read regular files only: symbolic links inside the folder are skipped (so nothing is searched twice), as are named pipes and device files, which cannot be read to the end. The folder itself may be a symbolic link.
 
 ---
 
@@ -283,13 +290,15 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
       "blocked": 0,
       "parse_error": 0,
       "skipped_size": 0,
+      "skipped_offsite": 0,
       "skipped_type": 0
     }
   },
   "results": [
     { "url": "https://example.com/", "count": 13, "snippets": ["...the domain example.com is used to illustrate...", "...illustrative examples in documents without prior coordination..."] }
   ],
-  "blocked": []
+  "blocked": [],
+  "redirected_offsite": []
 }
 ```
 
@@ -312,7 +321,7 @@ Each file is parsed with a **30-second timeout**. If parsing takes longer (e.g. 
 }
 ```
 
-> For plain text files (no page structure), the `page` field is omitted from each match object.
+> For files without page structure (plain text, DOCX), the `page` field is omitted from each match object.
 
 ### Local Folder
 ```json
@@ -363,12 +372,14 @@ Not all fields are listed - self-explanatory fields such as `url`, `count`, `sni
 | `stats.errors.network_error_reasons` | *(web crawl)* Breakdown by cause (e.g. `Timeout: 30, HTTP 404: 5`) |
 | `stats.errors.blocked` | *(web crawl)* Pages returning 403/429 or detected bot-protection challenges |
 | `stats.errors.skipped_size` | *(web crawl)* Files that exceeded `--max-bytes` and were not parsed |
+| `stats.errors.skipped_offsite` | *(web crawl)* Redirects to another site that were not followed (no `--allow-external`) |
+| `redirected_offsite` | *(web crawl)* Each such redirect: the `url` that redirected and the `target` it pointed to |
 | `stats.files_skipped` | *(folder)* Files that exceeded `--max-bytes` and were not scanned |
 | `stats.files_failed` | *(folder)* Files that could not be read or parsed (permission error, corrupt file, etc.) |
 | `matches[].page` | *(file/folder)* Page number (1-based); omitted when the file has no page structure |
-| `matches[].line` | *(file/folder)* Line number within the page (1-based) |
-| `matches[].count` | *(file/folder)* Keyword occurrences on that line |
-| `matches[].snippet` | *(file/folder)* Trimmed line content, truncated to 120 characters |
+| `matches[].line` | *(file/folder)* Line number within the page (1-based). In PDFs, blank lines are not counted, so the number matches the printed line on the page |
+| `matches[].count` | *(file/folder)* Keyword occurrences starting on that line |
+| `matches[].snippet` | *(file/folder)* The line's content (joined with the next line when a phrase continues there), cut to 120 characters around the match |
 
 ---
 
@@ -377,13 +388,14 @@ Not all fields are listed - self-explanatory fields such as `url`, `count`, `sni
 WebGrep is designed with a modular architecture for performance and maintainability:
 
 - **CliOptions**: Parses and validates all command-line arguments. Enforces mutual exclusion between `--url`, `--file`, and `--folder`.
-- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Maintains a session cookie jar across requests, and retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl. Separates links into *navigation links* (respect depth limit) and *document links* (always enqueued - documents are leaves that cannot expand the crawl frontier). On first SPA encounter, prompts the user and delegates to `PlaywrightRenderer`.
-- **PlaywrightRenderer**: Headless browser renderer for JavaScript-rendered SPAs. Manages browser lifecycle and selection across five tiers (system Chromium → system Firefox → cached Playwright Firefox → cached Playwright Chromium → first-time download). Uses `a.href` (the DOM property) for link resolution so that Angular/React apps with `<base href>` resolve relative URLs correctly. Also intercepts JSON API responses to capture document download URLs that SPAs serve via click handlers rather than plain `<a href>` links.
-- **BrowserFinder**: Locates system-installed browser binaries (Chromium/Chrome and Firefox) across Linux, macOS, and Windows via known install paths, falling back to `which`/`where` for non-standard package manager locations.
-- **ContentExtractor**: Extracts searchable text from HTML pages via Jsoup, and from binary documents via Apache Tika with a 30-second timeout per file to prevent hangs on corrupt or oversized content.
-- **MatchEngine**: Pluggable matching strategies (case-insensitive with diacritic support, exact, fuzzy/Levenshtein). Compiled regex patterns are cached per keyword/mode pair for performance. Returns both match counts and context snippets.
-- **UrlDeduplicator**: Smart URL deduplication. Treats `?id=1&sort=asc` as a variant of `?id=1` (same content, extra parameter) but allows `?id=2` through (different content). Use `--all-urls` to visit every URL regardless.
-- **ReportWriter**: Renders results as human-readable text or structured JSON. Covers all three input modes.
+- **Crawler**: Manages the multi-level crawl queue, domain scoping, body size limits, and configurable politeness delays. Follows redirects one hop at a time, so cookies are chosen per hop and a redirect off the site can be stopped before anything is sent there. Retries automatically on HTTP 429 with exponential backoff. Displays a live progress indicator during the crawl. Separates links into *navigation links* (respect depth limit) and *document links* (always enqueued - documents are leaves that cannot expand the crawl frontier). On first SPA encounter, prompts the user and delegates to `PlaywrightRenderer`.
+- **CookieJar**: The session cookie store. Follows browser rules (RFC 6265): each cookie goes back only to the hosts, paths and schemes its `Domain`, `Path` and `Secure` attributes allow, and expires when it should.
+- **PlaywrightRenderer**: Headless browser renderer for JavaScript-rendered SPAs. Manages browser lifecycle and selection across four tiers (system Chromium → Playwright Firefox → Playwright Chromium → first-time download into WebGrep's own browser folder). Page text comes from the rendered HTML via Jsoup, so words in adjacent elements stay separate. Uses `a.href` (the DOM property) for link resolution so that Angular/React apps with `<base href>` resolve relative URLs correctly. Also intercepts JSON API responses to capture document download URLs that SPAs serve via click handlers rather than plain `<a href>` links.
+- **BrowserFinder**: Locates a system-installed Chromium or Chrome across Linux, macOS, and Windows via known install paths, falling back to `which`/`where` for non-standard package manager locations.
+- **ContentExtractor**: Extracts searchable text from HTML pages via Jsoup, and from binary documents via Apache Tika with a 30-second timeout per file to prevent hangs on corrupt or oversized content. Marks PDF page boundaries so matches can be reported by page.
+- **MatchEngine**: Pluggable matching strategies (case-insensitive with diacritic support, exact, fuzzy/Levenshtein). Compiled regex patterns are cached per keyword/mode pair for performance. Returns match counts, match positions, and context snippets.
+- **UrlDeduplicator**: Smart URL deduplication. Ignores parameters that never change content - tracking, session IDs, sort order - so `?id=1&sort=asc` is a variant of `?id=1`, while `?id=2` and `?id=1&page=2` are new pages. Use `--all-urls` to visit every URL regardless.
+- **ReportWriter**: Renders results as human-readable text or structured JSON. Covers all three input modes. Text from outside WebGrep - URLs, snippets, file names, server messages - is escaped so it cannot send control sequences to your terminal.
 
 ---
 

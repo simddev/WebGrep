@@ -280,4 +280,41 @@ public class AppIntegrationTest {
         int total = Integer.parseInt(output.replaceAll("(?s).*Total matches found: (\\d+).*", "$1"));
         assertTrue("Should have stopped before scanning all files", total <= 4);
     }
+
+    // ── PDF pages, special files ──────────────────────────────────────────────
+
+    @Test
+    public void testFileModeReportsPdfPageNumbers() throws Exception {
+        java.nio.file.Path pdf = ContentExtractorTest.writePdf(Files.createTempFile("webgrep-e2e", ".pdf"),
+                new String[]{"page one text"}, new String[]{"page two text"}, new String[]{"zebra on page three"});
+        try {
+            Main.main(new String[]{"-f", pdf.toString(), "-k", "zebra"});
+            String output = out();
+            assertTrue(output, output.contains("p.3, l.1"));
+            assertTrue(output.contains("zebra on page three"));
+        } finally {
+            Files.deleteIfExists(pdf);
+        }
+    }
+
+    @Test(timeout = 60_000)
+    public void testFolderModeDoesNotHangOnNamedPipe() throws Exception {
+        File dir = Files.createTempDirectory("webgrep-fifo-e2e").toFile();
+        dir.deleteOnExit();
+        Files.write(new File(dir, "a.txt").toPath(), "fox here".getBytes());
+        File fifo = new File(dir, "pipe");
+        fifo.deleteOnExit();
+        boolean made;
+        try {
+            made = new ProcessBuilder("mkfifo", fifo.getPath()).start().waitFor() == 0;
+        } catch (java.io.IOException e) {
+            made = false;
+        }
+        org.junit.Assume.assumeTrue("mkfifo is not available on this system", made);
+
+        Main.main(new String[]{"-F", dir.getAbsolutePath(), "-k", "fox"});
+        String output = out();
+        assertTrue(output.contains("Files scanned: 1"));
+        assertTrue(output.contains("Total matches found: 1"));
+    }
 }

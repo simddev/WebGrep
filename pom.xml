@@ -7,8 +7,9 @@
   <version>1.2.0</version>
   <name>WebGrep</name>
   <properties>
-    <maven.compiler.source>17</maven.compiler.source>
-    <maven.compiler.target>17</maven.compiler.target>
+    <!-- release, not source/target: compiles against the Java 17 API itself, so code that
+         needs a newer JDK fails the build instead of failing at runtime on Java 17. -->
+    <maven.compiler.release>17</maven.compiler.release>
   </properties>
 
   <dependencies>
@@ -26,6 +27,15 @@
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-parsers-standard-package</artifactId>
       <version>3.0.0</version>
+      <exclusions>
+        <!-- jcl-over-slf4j, which Tika also brings, provides the same Commons Logging classes
+             and routes them to SLF4J. Both on the classpath made the fat jar's copy of those
+             classes depend on build order. -->
+        <exclusion>
+          <groupId>commons-logging</groupId>
+          <artifactId>commons-logging</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -68,6 +78,23 @@
                   <mainClass>com.webgrep.Main</mainClass>
                 </transformer>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                <!-- Merge the dependencies' notice and licence files instead of keeping whichever
+                     copy happens to be shaded last. -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
+                  <addHeader>false</addHeader>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/LICENSE</resource>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/LICENSE.txt</resource>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/LICENSE.md</resource>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/DEPENDENCIES</resource>
+                </transformer>
               </transformers>
               <filters>
                 <filter>
@@ -76,6 +103,11 @@
                     <exclude>META-INF/*.SF</exclude>
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
+                    <!-- The fat jar runs on the class path as a single unnamed module, so the
+                         dependencies' module descriptors do not apply to it. -->
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/versions/*/module-info.class</exclude>
+                    <exclude>META-INF/versions/*/OSGI-INF/MANIFEST.MF</exclude>
                   </excludes>
                 </filter>
               </filters>

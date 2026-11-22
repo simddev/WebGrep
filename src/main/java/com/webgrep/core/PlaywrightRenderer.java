@@ -3,12 +3,13 @@ package com.webgrep.core;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.LoadState;
+import com.webgrep.utils.ConsoleText;
+import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
-import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.nio.file.Files;
@@ -16,6 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -27,15 +29,25 @@ import java.util.stream.Collectors;
  * during load and extracts document download URLs that are not present as plain
  * {@code <a href>} links in the DOM (e.g. click-handler-driven PDF downloads).
  *
- * <h2>Browser resolution order (first available wins)</h2>
+ * <h2>Browser resolution order (first that starts wins)</h2>
  * <ol>
- *   <li>System Chromium/Chrome - drives natively via CDP, most reliable</li>
- *   <li>System Firefox - best-effort; may fail on Dev/Nightly editions</li>
- *   <li>Playwright's cached Firefox (~/.cache/ms-playwright)</li>
- *   <li>Playwright's cached Chromium</li>
- *   <li>Prompt user to download Firefox (default) or Chromium</li>
+ *   <li>System Chromium/Chrome - driven natively via CDP</li>
+ *   <li>Playwright's Firefox - from WebGrep's own browser folder, then the shared Playwright cache</li>
+ *   <li>Playwright's Chromium - same two places</li>
+ *   <li>Prompt the user to download Firefox (default) or Chromium into WebGrep's own folder</li>
  * </ol>
- * Use {@code --browser firefox|chromium} to skip to the preferred tier.
+ * Use {@code --browser firefox|chromium} to skip the other browser's tiers.
+ *
+ * <p>An installed, branded Firefox is not used: Playwright drives Firefox through a protocol
+ * that only its own patched build contains, so a system Firefox of any edition fails to start.
+ *
+ * <h2>Why WebGrep has its own browser folder</h2>
+ * <p>Playwright normally shares one browser cache between every program that uses it. Whenever
+ * any of them installs a browser, Playwright deletes the cached browsers no living installation
+ * claims - and WebGrep's claim points into a temporary directory that is gone once WebGrep exits.
+ * Another project's {@code playwright install} would therefore delete WebGrep's browser.
+ * Browsers WebGrep downloads go into {@link #browsersPath()} instead, which nothing else
+ * touches. Browsers already in the shared cache are still used if they start.
  */
 public class PlaywrightRenderer implements AutoCloseable {
 
@@ -114,23 +126,25 @@ public class PlaywrightRenderer implements AutoCloseable {
 
     /**
      * User's browser preference: {@code "firefox"}, {@code "chromium"}, or {@code null} for auto.
-     * Controls which tiers of {@link #ensureReady()} are skipped.
+     * Controls which tiers of {@link #launchInstalled()} are skipped.
      */
     private final String preferredBrowser;
 
     /**
      * The data returned by a single successful page render.
      *
-     * @param text      visible text content extracted from the rendered DOM (with scripts and
-     *                  style elements removed).
+     * @param text      the rendered page's searchable text: title, body text and the
+     *                  description and keywords meta tags, extracted the same way as for a
+     *                  plain HTML page.
      * @param links     all {@code <a href>} URLs found in the rendered page, fully resolved
      *                  via the browser's {@code a.href} DOM property (respects {@code <base href>}).
      * @param docLinks  document download URLs: REST {@code /download} endpoints and file URLs
      *                  intercepted from JSON API responses, plus {@code <a download>} DOM links.
-     * @param cookies   cookies set by the browser during this navigation, to be returned to
-     *                  the crawler's cookie jar for subsequent Jsoup requests.
+     * @param cookies   cookies of the page's site that the browser holds after the render, with
+     *                  their attributes, to be returned to the crawler's {@link CookieJar}.
      */
-    public record RenderedPage(String text, List<String> links, List<String> docLinks, Map<String, String> cookies) {}
+    public record RenderedPage(String text, List<String> links, List<String> docLinks,
+                               List<CookieJar.Cookie> cookies) {}
 
     /**
      * Constructs a new {@code PlaywrightRenderer}.
@@ -214,12 +228,13 @@ public class PlaywrightRenderer implements AutoCloseable {
      * delays caused by large media assets.
      *
      * @param url     the URL to render.
-     * @param cookies cookies from the crawler's jar to inject into the browser before navigation,
-     *                allowing session-authenticated SPAs to render correctly.
+     * @param cookies the crawler's cookies, given to a new browser context so that
+     *                session-dependent SPAs render as they would for the crawler; the browser
+     *                sends each one only where its attributes allow.
      * @return a {@link RenderedPage} containing text, links, doc links, and updated cookies;
      *         or {@code null} if rendering is unavailable or the navigation timed out.
      */
-    public RenderedPage render(String url, Map<String, String> cookies) {
+    public RenderedPage render(String url, List<CookieJar.Cookie> cookies) {
         if (unavailable) return null;
         try {
             ensureReady();
@@ -229,7 +244,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                     ? e.getMessage().lines().findFirst().orElse("unknown error")
                     : e.getClass().getSimpleName();
             System.err.printf("%n  Warning: SPA rendering unavailable (%s).%n"
-                    + "  JavaScript-rendered pages will return no results.%n%n", cause);
+                    + "  JavaScript-rendered pages will return no results.%n%n", ConsoleText.safe(cause));
             return null;
         }
         try {
@@ -260,7 +275,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                 persistentPage.setDefaultTimeout(timeoutMs);
                 persistentPage.onResponse(
                         response -> captureDocLinks(response, this.interceptorUrlBase, this.interceptedLinks));
-                passCookies(persistentContext, cookies, url);
+                passCookies(persistentContext, cookies);
                 persistentBaseUrl = urlBase;
             }
 
@@ -305,7 +320,7 @@ public class PlaywrightRenderer implements AutoCloseable {
                 } catch (TimeoutError ignored) {}
             }
 
-            // Single evaluate round-trip: extract both innerText and resolved hrefs together.
+            // Single evaluate round-trip: collect resolved hrefs and the content root's HTML.
             // Previous approach called querySelectorAll then getAttribute per element - one
             // IPC call per anchor (80+ on some pages), adding ~150ms and leaking ElementHandles.
             @SuppressWarnings("unchecked")
@@ -330,21 +345,25 @@ public class PlaywrightRenderer implements AutoCloseable {
                     + "    'main, [role=main], [role=content], app-root, #app, #root, #content'"
                     + "  ) || document.body;"
                     + "  const wgClone = wgRoot ? wgRoot.cloneNode(true) : null;"
-                    + "  if (wgClone) wgClone.querySelectorAll('script,style,noscript').forEach(n=>n.remove());"
-                    // Title and meta tags are included so the rendered text covers the same
-                    // fields as ContentExtractor.extractTextFromHtml does for plain HTML pages.
+                    + "  if (wgClone) wgClone.querySelectorAll('script,style,noscript,template')"
+                    + "                      .forEach(n => n.remove());"
                     + "  const wgAttr = s => { const e = document.querySelector(s);"
                     + "                        return e ? (e.getAttribute('content') || '') : ''; };"
-                    + "  const wgBody = wgClone ? (wgClone.textContent || '') : '';"
-                    + "  return { text: (document.title || '') + ' ' + wgBody + ' '"
-                    + "                 + wgAttr('meta[name=description]') + ' '"
-                    + "                 + wgAttr('meta[name=keywords]'),"
+                    // The HTML, not textContent: textContent puts nothing between elements, and
+                    // framework output has no whitespace between them, so "<h1>Hello</h1><p>World"
+                    // would read as "HelloWorld". Jsoup turns the HTML into text instead.
+                    + "  return { title: document.title || '', html: wgClone ? wgClone.innerHTML : '',"
+                    + "           description: wgAttr('meta[name=description]'),"
+                    + "           keywords: wgAttr('meta[name=keywords]'),"
                     + "           links: [...new Set(ls)], downloadLinks: [...new Set(ds)] };"
                     + "}");
 
-            String text = snapshot != null ? (String) snapshot.get("text") : "";
+            String text = snapshot != null
+                    ? renderedText(asString(snapshot.get("title")), asString(snapshot.get("html")),
+                                   asString(snapshot.get("description")), asString(snapshot.get("keywords")))
+                    : "";
             @SuppressWarnings("unchecked")
-            List<String> domLinks = snapshot != null
+            List<String> domLinks = snapshot != null && snapshot.get("links") != null
                     ? (List<String>) snapshot.get("links")
                     : new ArrayList<>();
             @SuppressWarnings("unchecked")
@@ -356,29 +375,26 @@ public class PlaywrightRenderer implements AutoCloseable {
             // Add explicitly-marked download links so they bypass the depth limit in the crawler
             captured.addAll(domDownloadLinks);
 
-            // Round-trip cookies for the crawled host back to the crawler's jar so they
-            // survive context switches and are available to the Jsoup fetcher.
-            // Only include cookies scoped to the page's own domain - third-party cookies
-            // set by analytics scripts must not be filed under the wrong host.
-            Map<String, String> contextCookies = new HashMap<>();
+            // Return the page's own cookies to the crawler's jar, attributes intact, so they
+            // survive context switches and reach the Jsoup fetcher. Third-party cookies set by
+            // analytics scripts stay in the browser.
+            List<CookieJar.Cookie> contextCookies = new ArrayList<>();
             if (persistentContext != null) {
                 try {
                     String pageHost = new URL(url).getHost().toLowerCase(Locale.ROOT);
-                    persistentContext.cookies().forEach(c -> {
-                        if (c.name == null || c.value == null) return;
-                        if (c.domain == null) { contextCookies.put(c.name, c.value); return; }
-                        String d = c.domain.toLowerCase(Locale.ROOT);
-                        if (d.startsWith(".")) d = d.substring(1);
-                        if (pageHost.equals(d) || pageHost.endsWith("." + d)) {
-                            contextCookies.put(c.name, c.value);
+                    for (Cookie c : persistentContext.cookies()) {
+                        if (c.name == null || c.value == null || c.domain == null) continue;
+                        CookieJar.Cookie cookie = fromBrowserCookie(c);
+                        if (pageHost.equals(cookie.domain()) || pageHost.endsWith("." + cookie.domain())) {
+                            contextCookies.add(cookie);
                         }
-                    });
+                    }
                 } catch (Exception ignored) {}
             }
 
             return new RenderedPage(
-                    text != null ? text : "",
-                    domLinks != null ? domLinks : new ArrayList<>(),
+                    text,
+                    domLinks,
                     captured.stream().distinct().collect(Collectors.toList()),
                     contextCookies);
         } catch (Exception e) {
@@ -388,10 +404,40 @@ public class PlaywrightRenderer implements AutoCloseable {
                     ? e.getMessage().lines().findFirst().orElse("unknown error")
                     : e.getClass().getSimpleName();
             System.err.printf("%n  Warning: SPA render failed for %s (%s). Skipping page.%n%n",
-                    url, cause);
+                    ConsoleText.safe(url), ConsoleText.safe(cause));
             closePersistentContext();
             return null;
         }
+    }
+
+    /**
+     * Builds the searchable text of a rendered page in the same shape as
+     * {@link ContentExtractor#extractTextFromHtml}: title, body text, description, keywords.
+     *
+     * <p>The body text comes from parsing the rendered HTML with Jsoup, which separates block
+     * elements and line breaks with spaces exactly as it does for a plain HTML page.
+     *
+     * <p>Package-private so that tests can check the text without a browser.
+     *
+     * @param title       the document title.
+     * @param bodyHtml    the inner HTML of the page's content root, with scripts and styles removed.
+     * @param description the {@code meta name=description} content.
+     * @param keywords    the {@code meta name=keywords} content.
+     * @return the page text.
+     */
+    static String renderedText(String title, String bodyHtml, String description, String keywords) {
+        String body = Jsoup.parseBodyFragment(bodyHtml).body().text();
+        return title + " " + body + " " + description + " " + keywords;
+    }
+
+    /**
+     * Reads a value from the DOM snapshot as a string.
+     *
+     * @param value a value from the DOM snapshot.
+     * @return the value as a string; {@code ""} when absent or not a string.
+     */
+    private static String asString(Object value) {
+        return value instanceof String s ? s : "";
     }
 
     /**
@@ -452,28 +498,15 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Ensures the browser is launched and ready to render pages.
+     * Ensures a browser is launched and ready to render pages.
      *
-     * <p>If the browser is already connected, returns immediately. Otherwise, attempts to
-     * launch a browser through the following five tiers in order:
-     * <ol>
-     *   <li>System Chromium/Chrome (found via {@link BrowserFinder#findChromium}) - most
-     *       reliable because Chromium speaks CDP natively.</li>
-     *   <li>System Firefox (found via {@link BrowserFinder#findFirefox}) - best-effort;
-     *       Dev/Nightly editions are often incompatible with Playwright's protocol.</li>
-     *   <li>Playwright's cached Firefox ({@code ~/.cache/ms-playwright/firefox-*}).</li>
-     *   <li>Playwright's cached Chromium ({@code ~/.cache/ms-playwright/chromium-*}).</li>
-     *   <li>Download: if {@code --browser} was specified, downloads that browser;
-     *       otherwise prompts the user to choose (requires a TTY). In non-interactive
-     *       sessions, throws {@link IOException} instead of downloading silently.</li>
-     * </ol>
+     * <p>If the browser is already connected, returns immediately. Otherwise tries every browser
+     * that needs no download ({@link #launchInstalled()}). If none starts, a download is offered:
+     * the browser named by {@code --browser}, or the user's choice (Firefox by default). In a
+     * non-interactive session nothing is downloaded; an {@link IOException} explains how to
+     * install a browser instead.
      *
-     * <p>The {@code --browser} flag skips incompatible tiers:
-     * {@code --browser firefox} skips tier 1 (Chromium);
-     * {@code --browser chromium} skips tiers 2 and 3 (Firefox options).
-     *
-     * @throws IOException          if no browser is available and a download cannot be initiated
-     *                               (non-interactive session without a TTY).
+     * @throws IOException          if no browser is available and a download cannot be made.
      * @throws InterruptedException if the thread is interrupted while waiting for a download.
      */
     private void ensureReady() throws IOException, InterruptedException {
@@ -484,83 +517,104 @@ public class PlaywrightRenderer implements AutoCloseable {
         // are nulled out before playwright.close() releases them - otherwise the next render()
         // call finds stale non-null references to already-closed objects.
         closePersistentContext();
-        if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
-        playwright = null;
-        browser = null;
+        cleanupPlaywright();
 
+        String label = launchInstalled();
+        if (label == null) {
+            // Refuse to download silently in non-interactive sessions (CI, piped output,
+            // Docker). Without a TTY the user cannot confirm the download; they must run
+            // 'webgrep --install-browser' explicitly first.
+            if (System.console() == null) {
+                throw new IOException("No browser available for SPA rendering and no TTY to prompt. "
+                        + "Run 'webgrep --install-browser' to install one.");
+            }
+            String chosen = (preferredBrowser != null) ? preferredBrowser : promptBrowserChoice();
+            boolean isChromium = "chromium".equalsIgnoreCase(chosen);
+            System.err.printf("%n  Downloading Playwright %s for SPA rendering (~%s MB, one-time)...%n",
+                    isChromium ? "Chromium (Google)" : "Firefox (Mozilla)", isChromium ? "120" : "105");
+            int exitCode = installBrowser(chosen);
+            if (exitCode != 0) {
+                throw new IOException("Browser installer exited with code " + exitCode
+                        + ". Run '--install-browser' manually to see the full output.");
+            }
+            System.err.println();
+            label = launchInstalled();
+            if (label == null) throw new IOException("The browser was installed but could not be started");
+        }
+        System.err.printf("  SPA renderer: using %s%n", label);
+    }
+
+    /**
+     * Launches the first browser that needs no download, in tier order, and leaves it in
+     * {@link #browser}.
+     *
+     * <ol>
+     *   <li>System Chromium/Chrome (found via {@link BrowserFinder#findChromium}).</li>
+     *   <li>Playwright's Firefox, from WebGrep's own folder, then from the shared cache.</li>
+     *   <li>Playwright's Chromium, from the same two places.</li>
+     * </ol>
+     * {@code --browser firefox} skips the Chromium tiers; {@code --browser chromium} skips the
+     * Firefox tier. A cached build that does not start - for instance one installed by a
+     * different Playwright version - is skipped.
+     *
+     * @return a description of the browser launched, or {@code null} if none started.
+     */
+    private String launchInstalled() {
         boolean wantChromium = "chromium".equalsIgnoreCase(preferredBrowser);
-        boolean wantFirefox  = "firefox".equalsIgnoreCase(preferredBrowser);
+        boolean wantFirefox = "firefox".equalsIgnoreCase(preferredBrowser);
 
-        // ── 1. System Chromium / Chrome ───────────────────────────────────────
-        // Chromium-family browsers speak CDP natively - Playwright drives them via
-        // executablePath without any custom patches, so this is the most reliable option.
         if (!wantFirefox) {
             Optional<Path> sysChr = BrowserFinder.findChromium();
-            if (sysChr.isPresent()) {
-                try {
-                    initPlaywright();
-                    browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                            .setExecutablePath(sysChr.get()).setHeadless(true));
-                    System.err.printf("  SPA renderer: using system Chromium (%s)%n", sysChr.get());
-                    return;
-                } catch (Exception e) {
-                    cleanupPlaywright();
-                }
+            if (sysChr.isPresent() && tryLaunch(browsersPath(), Playwright::chromium, sysChr.get())) {
+                return "system Chromium (" + sysChr.get() + ")";
             }
         }
-
-        // ── 2. System Firefox ─────────────────────────────────────────────────
-        // Best-effort: Playwright needs its patched Firefox, so this can fail on Dev/Nightly.
         if (!wantChromium) {
-            Optional<Path> sysFf = BrowserFinder.findFirefox();
-            if (sysFf.isPresent()) {
-                try {
-                    initPlaywright();
-                    browser = playwright.firefox().launch(new BrowserType.LaunchOptions()
-                            .setExecutablePath(sysFf.get()).setHeadless(true));
-                    System.err.printf("  SPA renderer: using system Firefox (%s)%n", sysFf.get());
-                    return;
-                } catch (Exception e) {
-                    // Dev/Nightly often incompatible with Playwright's protocol - fall through silently.
-                    cleanupPlaywright();
+            for (Path dir : browserDirs()) {
+                if (hasBrowser(dir, "firefox-") && tryLaunch(dir, Playwright::firefox, null)) {
+                    return "Playwright Firefox" + location(dir);
                 }
             }
         }
-
-        // ── 3. Playwright's cached Firefox ────────────────────────────────────
-        if (!wantChromium && isFirefoxCached()) {
-            try {
-                initPlaywright();
-                browser = playwright.firefox().launch(new BrowserType.LaunchOptions().setHeadless(true));
-                System.err.printf("  SPA renderer: using Playwright Firefox%n");
-                return;
-            } catch (Exception e) {
-                cleanupPlaywright();
+        if (!wantFirefox) {
+            for (Path dir : browserDirs()) {
+                if (hasBrowser(dir, "chromium") && tryLaunch(dir, Playwright::chromium, null)) {
+                    return "Playwright Chromium" + location(dir);
+                }
             }
         }
+        return null;
+    }
 
-        // ── 4. Playwright's cached Chromium ───────────────────────────────────
-        if (!wantFirefox && isChromiumCached()) {
-            try {
-                initPlaywright();
-                browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-                System.err.printf("  SPA renderer: using Playwright Chromium%n");
-                return;
-            } catch (Exception e) {
-                cleanupPlaywright();
-            }
+    /**
+     * Tries to launch one browser headlessly.
+     *
+     * @param browsersDir the Playwright browser folder to look in.
+     * @param type        selects Firefox or Chromium.
+     * @param executable  a system browser binary, or {@code null} to use Playwright's own build.
+     * @return {@code true} if the browser started; otherwise everything is cleaned up again.
+     */
+    private boolean tryLaunch(Path browsersDir, Function<Playwright, BrowserType> type, Path executable) {
+        try {
+            initPlaywright(browsersDir);
+            BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(true);
+            if (executable != null) options.setExecutablePath(executable);
+            browser = type.apply(playwright).launch(options);
+            return true;
+        } catch (Exception e) {
+            cleanupPlaywright();
+            return false;
         }
+    }
 
-        // ── 5. Nothing found - ask user which browser to download ─────────────
-        // Refuse to download silently in non-interactive sessions (CI, piped output,
-        // Docker). Without a TTY the user cannot confirm the download; they must run
-        // 'webgrep --install-browser' explicitly first.
-        if (System.console() == null) {
-            throw new IOException("No browser available for SPA rendering and no TTY to prompt. "
-                    + "Run 'webgrep --install-browser' to install one.");
-        }
-        String chosen = (preferredBrowser != null) ? preferredBrowser : promptBrowserChoice();
-        downloadAndLaunch(chosen);
+    /**
+     * Describes where a browser was found, for the "using ..." message.
+     *
+     * @param dir the browser folder a browser was launched from.
+     * @return the description to append; {@code ""} for WebGrep's own folder.
+     */
+    private static String location(Path dir) {
+        return dir.equals(sharedBrowsersPath()) ? " (shared Playwright cache)" : "";
     }
 
     /**
@@ -589,43 +643,42 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Downloads the specified browser via the Playwright CLI and launches it.
+     * Downloads a Playwright browser into WebGrep's own browser folder.
      *
-     * <p>Calls {@code com.microsoft.playwright.CLI.main({"install", browserType})} which is
-     * the official Playwright browser installer. After the download completes, the browser
-     * is launched headlessly and stored in {@link #browser}.
+     * <p>Runs the official Playwright installer ({@code com.microsoft.playwright.CLI install})
+     * in a subprocess. Calling it in-process would end the JVM: the installer finishes with
+     * {@code System.exit()}, which would terminate a running crawl. The installer's output is
+     * shown to the user.
      *
      * @param browserType {@code "firefox"} or {@code "chromium"}.
-     * @throws IOException          if the Playwright initialisation fails.
-     * @throws InterruptedException if the thread is interrupted during the download.
+     * @return the installer's exit code; {@code 0} on success.
+     * @throws IOException          if the installer cannot be started.
+     * @throws InterruptedException if interrupted while waiting for it.
      */
-    private void downloadAndLaunch(String browserType) throws IOException, InterruptedException {
-        boolean isChromium = "chromium".equalsIgnoreCase(browserType);
-        String label = isChromium ? "Chromium (Google)" : "Firefox (Mozilla)";
-        System.err.printf("%n  Downloading Playwright %s for SPA rendering (~%s MB, one-time)...%n",
-                label, isChromium ? "120" : "105");
-
-        // CLI.main() calls System.exit() on completion - which would terminate the running crawl.
-        // Run the installer in a subprocess so the JVM process survives the download.
+    public static int installBrowser(String browserType) throws IOException, InterruptedException {
         String javaExe = ProcessHandle.current().info().command().orElse("java");
-        String cp = playwrightClasspath();
-        Process proc = new ProcessBuilder(javaExe, "-cp", cp,
+        ProcessBuilder installer = new ProcessBuilder(javaExe, "-cp", playwrightClasspath(),
                 "com.microsoft.playwright.CLI", "install",
-                isChromium ? "chromium" : "firefox")
-                .inheritIO()
-                .start();
-        int exitCode = proc.waitFor();
-        if (exitCode != 0) {
-            throw new IOException("Browser installer exited with code " + exitCode
-                    + ". Run '--install-browser' manually to see the full output.");
-        }
-        System.err.println();
+                "chromium".equalsIgnoreCase(browserType) ? "chromium" : "firefox")
+                .inheritIO();
+        installer.environment().put("PLAYWRIGHT_BROWSERS_PATH", browsersPath().toString());
+        return installer.start().waitFor();
+    }
 
-        initPlaywright();
-        if (isChromium) {
-            browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-        } else {
-            browser = playwright.firefox().launch(new BrowserType.LaunchOptions().setHeadless(true));
+    /**
+     * Returns a description of the browser WebGrep would use, without downloading anything.
+     *
+     * <p>Each candidate is actually launched and closed again, so "available" means "starts",
+     * not merely "a folder of that name exists".
+     *
+     * @param timeoutMs        navigation timeout; unused for the check itself.
+     * @param preferredBrowser {@code "auto"}, {@code "firefox"} or {@code "chromium"}.
+     * @return the description, e.g. {@code "Playwright Firefox"}; or {@code null} if no browser
+     *         starts.
+     */
+    public static String findUsableBrowser(int timeoutMs, String preferredBrowser) {
+        try (PlaywrightRenderer probe = new PlaywrightRenderer(timeoutMs, false, preferredBrowser)) {
+            return probe.launchInstalled();
         }
     }
 
@@ -641,18 +694,21 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Creates a new {@link Playwright} instance with {@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1}
-     * in the environment, preventing Playwright from downloading any browser automatically
-     * during initialisation.
+     * Creates a new {@link Playwright} instance that looks for browsers in {@code browsersDir}.
+     *
+     * <p>{@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1} prevents Playwright from downloading a browser
+     * on its own during initialisation; downloads only ever happen through
+     * {@link #installBrowser}, after the user has agreed.
      *
      * <p>Playwright emits noisy initialisation output to stderr; that stream is temporarily
      * redirected to null while the instance is created, then restored immediately after.
      *
-     * @throws IOException if Playwright fails to initialise.
+     * @param browsersDir the Playwright browser folder to use.
      */
-    private void initPlaywright() throws IOException {
+    private void initPlaywright(Path browsersDir) {
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
+        env.put("PLAYWRIGHT_BROWSERS_PATH", browsersDir.toString());
         PrintStream originalErr = System.err;
         try {
             System.setErr(new PrintStream(OutputStream.nullOutputStream()));
@@ -663,28 +719,62 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Returns the OS-appropriate Playwright browser cache directory, respecting the
-     * {@code PLAYWRIGHT_BROWSERS_PATH} environment variable when set.
+     * Returns WebGrep's own browser folder, where browsers it downloads are installed.
      *
+     * <p>If {@code PLAYWRIGHT_BROWSERS_PATH} is set, that folder is used instead, for both
+     * looking up and installing browsers. Otherwise:
      * <ul>
-     *   <li>Linux: {@code ~/.cache/ms-playwright}</li>
-     *   <li>macOS: {@code ~/Library/Caches/ms-playwright}</li>
-     *   <li>Windows: {@code %LOCALAPPDATA%\ms-playwright}</li>
+     *   <li>Linux: {@code $XDG_CACHE_HOME/webgrep/browsers} ({@code ~/.cache/webgrep/browsers})</li>
+     *   <li>macOS: {@code ~/Library/Caches/webgrep/browsers}</li>
+     *   <li>Windows: {@code %LOCALAPPDATA%\webgrep\browsers}</li>
      * </ul>
+     *
+     * @return the folder; it need not exist yet.
      */
-    public static Path playwrightCachePath() {
+    public static Path browsersPath() {
         String env = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
         if (env != null && !env.isBlank()) return Paths.get(env);
+        return cacheRoot().resolve("webgrep").resolve("browsers");
+    }
+
+    /**
+     * Returns the cache folder Playwright shares between all programs that use it.
+     *
+     * @return {@code ms-playwright} inside the platform's cache directory.
+     */
+    private static Path sharedBrowsersPath() {
+        return cacheRoot().resolve("ms-playwright");
+    }
+
+    /**
+     * Returns the folders to look for Playwright browsers in.
+     *
+     * @return WebGrep's own folder, then the shared cache; with {@code PLAYWRIGHT_BROWSERS_PATH}
+     *         set, only that folder.
+     */
+    static List<Path> browserDirs() {
+        String env = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
+        if (env != null && !env.isBlank()) return List.of(Paths.get(env));
+        return List.of(browsersPath(), sharedBrowsersPath());
+    }
+
+    /**
+     * Returns the platform's per-user cache directory, as Playwright itself determines it.
+     *
+     * @return {@code %LOCALAPPDATA%} on Windows, {@code ~/Library/Caches} on macOS, and
+     *         {@code $XDG_CACHE_HOME} (default {@code ~/.cache}) elsewhere.
+     */
+    private static Path cacheRoot() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String home = System.getProperty("user.home");
         if (os.contains("win")) {
-            String lad = System.getenv().getOrDefault("LOCALAPPDATA",
-                    System.getProperty("user.home") + "\\AppData\\Local");
-            return Paths.get(lad, "ms-playwright");
+            return Paths.get(System.getenv().getOrDefault("LOCALAPPDATA", home + "\\AppData\\Local"));
         }
         if (os.contains("mac")) {
-            return Paths.get(System.getProperty("user.home"), "Library", "Caches", "ms-playwright");
+            return Paths.get(home, "Library", "Caches");
         }
-        return Paths.get(System.getProperty("user.home"), ".cache", "ms-playwright");
+        String xdg = System.getenv("XDG_CACHE_HOME");
+        return xdg != null && !xdg.isBlank() ? Paths.get(xdg) : Paths.get(home, ".cache");
     }
 
     /**
@@ -693,6 +783,8 @@ public class PlaywrightRenderer implements AutoCloseable {
      *
      * <p>Uses {@link URI} conversion to correctly handle directory paths that contain spaces,
      * unlike the URL-encoded string returned by {@link java.net.URL#getPath()}.
+     *
+     * @return the file-system path of the JAR or classes directory.
      */
     public static String playwrightClasspath() {
         try {
@@ -706,60 +798,79 @@ public class PlaywrightRenderer implements AutoCloseable {
     }
 
     /**
-     * Returns {@code true} if a Playwright-cached Firefox build is present in the cache.
+     * Returns {@code true} if {@code dir} contains a browser build whose folder name starts with
+     * {@code prefix} (e.g. {@code "firefox-"}).
      *
-     * @return {@code true} if a directory starting with {@code "firefox-"} exists in the cache.
+     * @param dir    a Playwright browser folder.
+     * @param prefix the folder name prefix to look for.
+     * @return {@code true} if at least one matching folder exists; {@code false} on any error.
      */
-    private static boolean isFirefoxCached() {
-        return isPlaywrightCached("firefox-");
-    }
-
-    /**
-     * Returns {@code true} if a Playwright-cached Chromium build is present in the cache.
-     *
-     * @return {@code true} if a directory starting with {@code "chromium-"} exists in the cache.
-     */
-    private static boolean isChromiumCached() {
-        return isPlaywrightCached("chromium-");
-    }
-
-    /**
-     * Checks whether the Playwright browser cache directory contains an entry with the given prefix.
-     *
-     * @param prefix the directory name prefix to look for (e.g. {@code "firefox-"}).
-     * @return {@code true} if at least one matching directory exists; {@code false} on any error.
-     */
-    private static boolean isPlaywrightCached(String prefix) {
-        try {
-            Path cache = playwrightCachePath();
-            if (!Files.isDirectory(cache)) return false;
-            try (var entries = Files.list(cache)) {
-                return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
-            }
+    private static boolean hasBrowser(Path dir, String prefix) {
+        if (!Files.isDirectory(dir)) return false;
+        try (var entries = Files.list(dir)) {
+            return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
         } catch (IOException e) {
             return false;
         }
     }
 
     /**
-     * Injects the crawler's session cookies into the given browser context before navigation.
+     * Gives the crawler's cookies to a new browser context before its first navigation.
      *
-     * <p>Converts the flat {@code name → value} cookie map into Playwright {@link Cookie}
-     * objects scoped to the domain and root path {@code "/"}.
+     * <p>Each cookie keeps its attributes, so the browser sends it only where it belongs. A
+     * cookie the browser refuses (for instance an invalid name) is skipped on its own rather
+     * than failing the page.
      *
-     * @param context the browser context to inject cookies into.
-     * @param cookies the cookie map collected by the Jsoup fetcher for this host.
-     * @param url     the URL being navigated to; the hostname is used as the cookie domain.
+     * @param context the browser context.
+     * @param cookies the cookies to add.
      */
-    private void passCookies(BrowserContext context, Map<String, String> cookies, String url) {
+    private static void passCookies(BrowserContext context, List<CookieJar.Cookie> cookies) {
         if (cookies.isEmpty()) return;
+        List<Cookie> converted = cookies.stream().map(PlaywrightRenderer::toBrowserCookie).toList();
         try {
-            String domain = new URL(url).getHost().toLowerCase(Locale.ROOT);
-            List<Cookie> pwCookies = cookies.entrySet().stream()
-                    .map(e -> new Cookie(e.getKey(), e.getValue()).setDomain(domain).setPath("/"))
-                    .collect(Collectors.toList());
-            context.addCookies(pwCookies);
-        } catch (MalformedURLException ignored) {}
+            context.addCookies(converted);
+        } catch (Exception batchFailed) {
+            for (Cookie cookie : converted) {
+                try {
+                    context.addCookies(List.of(cookie));
+                } catch (Exception ignored) {
+                    // The page still loads without this cookie.
+                }
+            }
+        }
+    }
+
+    /**
+     * Converts a jar cookie to Playwright's form. A leading dot on the domain is how the browser
+     * marks a cookie that subdomains receive too; without it the cookie is host-only.
+     *
+     * @param c the jar cookie.
+     * @return the same cookie for the browser.
+     */
+    static Cookie toBrowserCookie(CookieJar.Cookie c) {
+        Cookie cookie = new Cookie(c.name(), c.value())
+                .setDomain(c.hostOnly() ? c.domain() : "." + c.domain())
+                .setPath(c.path())
+                .setSecure(c.secure())
+                .setHttpOnly(c.httpOnly());
+        if (c.expiresAt() >= 0) cookie.setExpires(c.expiresAt() / 1000.0);
+        return cookie;
+    }
+
+    /**
+     * Converts a cookie reported by the browser to the jar's form.
+     *
+     * @param c the browser cookie; its domain must not be {@code null}.
+     * @return the same cookie for the jar.
+     */
+    static CookieJar.Cookie fromBrowserCookie(Cookie c) {
+        String domain = c.domain.toLowerCase(Locale.ROOT);
+        boolean hostOnly = !domain.startsWith(".");
+        if (!hostOnly) domain = domain.substring(1);
+        long expiresAt = c.expires == null || c.expires < 0 ? -1 : (long) (c.expires * 1000);
+        return new CookieJar.Cookie(c.name, c.value, domain, hostOnly,
+                c.path == null || c.path.isEmpty() ? "/" : c.path,
+                Boolean.TRUE.equals(c.secure), Boolean.TRUE.equals(c.httpOnly), expiresAt);
     }
 
     /**
@@ -782,7 +893,7 @@ public class PlaywrightRenderer implements AutoCloseable {
             int port = u.getPort();
             String portPart = (port != -1 && port != u.getDefaultPort()) ? ":" + port : "";
             return u.getProtocol() + "://" + u.getHost() + portPart;
-        } catch (MalformedURLException e) {
+        } catch (Exception e) {
             return "";
         }
     }
@@ -797,5 +908,7 @@ public class PlaywrightRenderer implements AutoCloseable {
         closePersistentContext();
         if (browser != null) try { browser.close(); } catch (Exception ignored) {}
         if (playwright != null) try { playwright.close(); } catch (Exception ignored) {}
+        browser = null;
+        playwright = null;
     }
 }

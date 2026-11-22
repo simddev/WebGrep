@@ -100,7 +100,10 @@ public class CliOptions {
      * supported. Boolean flags (e.g. {@code --allow-external}) take no value token; all other
      * flags consume the next token. The special case {@code -\d.*} (a next token that looks
      * like a negative number, e.g. {@code -100}) is allowed as a value even though it starts
-     * with {@code -}.
+     * with {@code -}. Any other value that starts with {@code -} - a keyword such as
+     * {@code --force} - is given in the attached form {@code --keyword=--force}, so that a
+     * forgotten value ({@code -u -k x}) is still reported instead of silently taking the next
+     * flag as its value.
      *
      * <p>Returns immediately (without parsing the rest of the args) after seeing {@code --help}
      * or {@code --install-browser}, since those flags cause an early exit.
@@ -119,7 +122,17 @@ public class CliOptions {
             String key = null;
             boolean hasValue = false;
 
-            if (arg.startsWith("--")) {
+            if (arg.startsWith("--") && arg.indexOf('=') > 2) {
+                // Attached form: --keyword=VALUE. The value may start with '-'.
+                int eq = arg.indexOf('=');
+                key = arg.substring(2, eq);
+                if (!KNOWN_FLAGS.contains(key))
+                    throw new IllegalArgumentException("Unknown option: --" + key);
+                if (!isValuedFlag(key))
+                    throw new IllegalArgumentException("Option --" + key + " does not take a value");
+                params.put(key, arg.substring(eq + 1));
+                continue;
+            } else if (arg.startsWith("--")) {
                 key = arg.substring(2);
                 if (!KNOWN_FLAGS.contains(key))
                     throw new IllegalArgumentException("Unknown option: --" + key);
@@ -150,7 +163,8 @@ public class CliOptions {
                         params.put(key, args[i + 1]);
                         i++;
                     } else {
-                        throw new IllegalArgumentException("Option --" + key + " requires a value but none was given");
+                        throw new IllegalArgumentException("Option --" + key + " requires a value but none was given"
+                                + " (for a value that starts with '-', write --" + key + "=VALUE)");
                     }
                 } else {
                     params.put(key, "true");
@@ -293,9 +307,11 @@ public class CliOptions {
         if (inputCount == 0)
             throw new IllegalArgumentException("Specify a target: --url <URL>, --file <path>, or --folder <path>");
         if (url != null) {
-            // Reject any explicit scheme that is not http(s): covers both "ftp://x" and "javascript:x"
+            // Reject any explicit scheme that is not http(s): covers both "ftp://x" and "javascript:x".
+            // Schemes are case-insensitive, so HTTPS://example.com is as valid as https://example.com.
             if (url.matches("^[a-zA-Z][a-zA-Z0-9+.-]*:.*")
-                    && !url.startsWith("http://") && !url.startsWith("https://"))
+                    && !url.regionMatches(true, 0, "http://", 0, 7)
+                    && !url.regionMatches(true, 0, "https://", 0, 8))
                 throw new IllegalArgumentException("URL scheme must be http or https");
             // Reject URLs that produce no usable host after normalisation (e.g. "http://", "https://").
             if (UrlUtils.normalizeUrl(url, null).isEmpty())
@@ -340,12 +356,13 @@ public class CliOptions {
         System.out.println("  -a, --all-urls           Disable smart URL deduplication; visit every URL regardless of query parameters");
         System.out.println("  -n, --max-hits <n>       Stop after finding n total matches (default: 0 = no limit); applies to web crawl and folder scan");
         System.out.println("  -s, --dfs                Use depth-first search instead of breadth-first search");
-        System.out.println("  -e, --allow-external     Allow crawling external domains");
+        System.out.println("  -e, --allow-external     Allow crawling external domains, following links and redirects there");
         System.out.println("  -i, --insecure           Trust all SSL certificates (dangerous)");
         System.out.println("  -o, --output <format>    Output format: text (default) or json");
         System.out.println("      --browser <type>     Browser for SPA rendering: auto (default), firefox, or chromium");
         System.out.println("      --install-browser    Install a browser for SPA rendering and exit (uses --browser preference)");
         System.out.println("  -h, --help               Show this help message");
+        System.out.println("\nValues that start with '-' are written attached: --keyword=--force");
     }
 
     // ── Getters ───────────────────────────────────────────────────────────────

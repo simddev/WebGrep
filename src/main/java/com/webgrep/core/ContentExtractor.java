@@ -4,14 +4,25 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.apache.tika.Tika;
+import org.apache.tika.exception.WriteLimitReachedException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.metadata.HttpHeaders;
+import org.apache.tika.parser.ParseContext;
+import org.apache.tika.parser.Parser;
+import org.apache.tika.sax.BodyContentHandler;
+import org.apache.tika.sax.ContentHandlerDecorator;
+import org.apache.tika.sax.WriteOutContentHandler;
+import org.xml.sax.Attributes;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.SAXException;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.*;
@@ -30,9 +41,11 @@ import com.webgrep.utils.UrlUtils;
  *
  * <p>If Tika fails or times out, the raw bytes are returned as a UTF-8 string as a last resort.
  *
- * <p>Note: Tika uses the form-feed character ({@code \f}, U+000C) as a page separator in
- * multi-page documents such as PDFs. Callers that need per-page line numbers should split the
- * extracted text on {@code \f} before further processing.
+ * <p>Page boundaries: Tika reports each page of a PDF as a {@code <div class="page">} element,
+ * which its plain-text output turns into nothing more than blank lines. Text is therefore
+ * extracted through {@link PageBreakHandler}, which puts a form feed ({@code \f}, U+000C)
+ * between pages and after the last one. Callers that need per-page line numbers split the
+ * extracted text on {@code \f}.
  */
 public class ContentExtractor {
 
@@ -159,11 +172,7 @@ public class ContentExtractor {
      * @return the extracted text, or {@code null} if parsing timed out or threw an exception.
      */
     private String tikaParseWithTimeout(byte[] body, Metadata metadata) {
-        Future<String> future = TIKA_EXECUTOR.submit(() -> {
-            try (InputStream is = new ByteArrayInputStream(body)) {
-                return metadata != null ? tika.parseToString(is, metadata) : tika.parseToString(is);
-            }
-        });
+        Future<String> future = TIKA_EXECUTOR.submit(() -> parseWithPageBreaks(body, metadata));
         try {
             return future.get(TIKA_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
@@ -174,6 +183,98 @@ public class ContentExtractor {
             return null;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * Parses a document to plain text with a form feed between pages.
+     *
+     * <p>Does what {@link Tika#parseToString(InputStream, Metadata)} does - auto-detect the
+     * format, parse embedded documents too, stop quietly at the string-length limit - but routes
+     * the text through {@link PageBreakHandler} so that page boundaries survive.
+     *
+     * @param body     the raw bytes to parse.
+     * @param metadata Tika metadata hints, or {@code null} to rely on magic-byte detection.
+     * @return the extracted text, truncated at {@link Tika#getMaxStringLength()} characters.
+     * @throws Exception if the document cannot be parsed.
+     */
+    private String parseWithPageBreaks(byte[] body, Metadata metadata) throws Exception {
+        Parser parser = tika.getParser();
+        ParseContext context = new ParseContext();
+        context.set(Parser.class, parser);
+        WriteOutContentHandler text = new WriteOutContentHandler(tika.getMaxStringLength());
+        try (InputStream is = new ByteArrayInputStream(body)) {
+            parser.parse(is, new BodyContentHandler(new PageBreakHandler(text)),
+                    metadata != null ? metadata : new Metadata(), context);
+        } catch (SAXException e) {
+            if (!WriteLimitReachedException.isWriteLimitReached(e)) throw e;
+        }
+        return text.toString();
+    }
+
+    /**
+     * Writes a form feed ({@code \f}) at the start of every page after the first, and one more
+     * at the end of the document.
+     *
+     * <p>Tika's PDF parser wraps each page in {@code <div class="page">}. A marker goes at the
+     * start of the next page rather than the end of the previous one, so text Tika emits after
+     * the last page - bookmarks, form-field values - stays with the last page instead of
+     * appearing as an extra page that does not exist. The final marker closes the last page;
+     * without it a one-page document would contain no form feed at all and could not be told
+     * apart from plain text.
+     *
+     * <p>Only pages of the top-level document are marked. A PDF embedded in another document
+     * (an attachment, an entry in a ZIP) would otherwise continue the page count of its
+     * container, producing page numbers that match no page the user can open.
+     */
+    static final class PageBreakHandler extends ContentHandlerDecorator {
+
+        /** The character inserted between pages. */
+        private static final char[] FORM_FEED = {'\f'};
+
+        /** For each open {@code div}: whether it wraps an embedded document. */
+        private final Deque<Boolean> openDivs = new ArrayDeque<>();
+
+        /** Number of open {@code div}s that wrap an embedded document. */
+        private int embeddedDepth = 0;
+
+        /** Number of top-level pages started so far. */
+        private int pages = 0;
+
+        /**
+         * Wraps the handler that receives the text.
+         *
+         * @param handler the handler that receives the text, page markers included.
+         */
+        PageBreakHandler(ContentHandler handler) {
+            super(handler);
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes atts)
+                throws SAXException {
+            if ("div".equals(localName)) {
+                String cls = atts.getValue("class");
+                boolean embedded = "embedded".equals(cls) || "package-entry".equals(cls);
+                if (embedded) embeddedDepth++;
+                openDivs.push(embedded);
+                if ("page".equals(cls) && embeddedDepth == 0 && pages++ > 0) {
+                    super.characters(FORM_FEED, 0, 1);
+                }
+            }
+            super.startElement(uri, localName, qName, atts);
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String qName) throws SAXException {
+            if ("div".equals(localName) && !openDivs.isEmpty() && openDivs.pop()) embeddedDepth--;
+            super.endElement(uri, localName, qName);
+        }
+
+        @Override
+        public void endDocument() throws SAXException {
+            if (pages > 0) super.characters(FORM_FEED, 0, 1);
+            super.endDocument();
         }
     }
 

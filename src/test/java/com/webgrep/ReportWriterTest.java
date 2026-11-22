@@ -536,4 +536,60 @@ public class ReportWriterTest {
         assertTrue("High surrogate must be followed by low surrogate",
                 foxPos >= 0 && json.charAt(foxPos) == '\uD83E' && json.charAt(foxPos + 1) == '\uDD8A');
     }
+
+    // ── terminal safety and off-site redirects ────────────────────────────────
+
+    @Test
+    public void testTextOutputEscapesControlCharactersFromOutside() {
+        CrawlResult result = new CrawlResult();
+        result.addMatch("http://example.com/\u001b]0;title\u0007", 1);
+        result.snippets.put("http://example.com/\u001b]0;title\u0007", List.of("snippet \u001b[2J here"));
+        result.addNetworkError("reason with \u001b[31m colour");
+        result.addBlocked("http://example.com/\u001b[8m", "403");
+        new ReportWriter().printTextOutput(result);
+        String output = out.toString();
+        assertFalse("No raw ESC may reach the terminal", output.contains("\u001b"));
+        assertFalse(output.contains("\u0007"));
+        assertTrue(output.contains("http://example.com/\\x1B]0;title\\x07"));
+        assertTrue(output.contains("reason with \\x1B[31m colour"));
+    }
+
+    @Test
+    public void testFolderOutputEscapesControlCharactersInFileNames() {
+        List<FileScanResult> results = List.of(
+                fileResult("/tmp/docs/name\u001b]0;x\u0007.txt", new FileMatch(0, 1, 1, "fox")));
+        new ReportWriter().printFolderTextOutput(folderOpts("/tmp/docs", "fox"), results, 1, 0, 0, 0, 10);
+        String output = out.toString();
+        assertFalse(output.contains("\u001b"));
+        assertTrue(output.contains("name\\x1B]0;x\\x07.txt"));
+    }
+
+    @Test
+    public void testOffsiteRedirectsAreListedInTextAndJson() {
+        CrawlResult result = new CrawlResult();
+        result.addOffsiteRedirect("http://example.com/go", "http://other.org/landing");
+        new ReportWriter().printTextOutput(result);
+        String text = out.toString();
+        assertTrue(text.contains("Skipped (redirected off-site): 1"));
+        assertTrue(text.contains("Redirected to another site"));
+        assertTrue(text.contains("http://example.com/go -> http://other.org/landing"));
+
+        out.reset();
+        new ReportWriter().printJsonOutput(result, sampleOptions());
+        String json = out.toString();
+        assertTrue(json.contains("\"skipped_offsite\": 1"));
+        assertTrue(json.contains("\"redirected_offsite\": ["));
+        assertTrue(json.contains("{ \"url\": \"http://example.com/go\", \"target\": \"http://other.org/landing\" }"));
+    }
+
+    @Test
+    public void testJsonEscapesDeleteAndC1Controls() {
+        CrawlResult result = new CrawlResult();
+        result.addMatch("http://example.com/a", 1);
+        result.snippets.put("http://example.com/a", List.of("x\u007fy\u009bz"));
+        new ReportWriter().printJsonOutput(result, sampleOptions());
+        String json = out.toString();
+        assertFalse(json.contains("\u009b"));
+        assertTrue(json.contains("x\\u007fy\\u009bz"));
+    }
 }

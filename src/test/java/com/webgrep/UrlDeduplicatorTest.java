@@ -6,22 +6,60 @@ import static org.junit.Assert.*;
 
 public class UrlDeduplicatorTest {
 
-    // ── core sort/filter dedup ─────────────────────────────────────────────────
+    // ── noise parameters are ignored ───────────────────────────────────────────
 
     @Test
     public void testSortVariantIsDeduped() {
-        // Seed has ?id=X; sort/filter variants add extra params on top → duplicates
+        // Sort keys and sort directions do not change what a page contains.
         UrlDeduplicator d = new UrlDeduplicator(false);
         String seed = "http://example.com/page.aspx?id=12345";
         assertFalse(d.isDuplicate(seed));
         d.markQueued(seed);
 
-        // Same base + same primary param + extra sort param → duplicate
         assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=name"));
         assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=date"));
         assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&dir=asc"));
         assertTrue(d.isDuplicate("http://example.com/page.aspx?id=12345&sort=name&dir=asc"));
+        assertTrue(d.isDuplicate("http://example.com/page.aspx?orderby=title&order=DESC&id=12345"));
     }
+
+    @Test
+    public void testTrackingParametersAreIgnored() {
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        d.markQueued("https://example.com/article?id=7");
+
+        assertTrue(d.isDuplicate("https://example.com/article?id=7&utm_source=newsletter&utm_medium=email"));
+        assertTrue(d.isDuplicate("https://example.com/article?fbclid=IwAR0abc&id=7"));
+        assertTrue(d.isDuplicate("https://example.com/article?id=7&gclid=xyz"));
+        // A tracked link to a page without parameters is that page.
+        d.markQueued("https://example.com/about");
+        assertTrue(d.isDuplicate("https://example.com/about?utm_campaign=spring"));
+    }
+
+    @Test
+    public void testSessionTokensAreIgnored() {
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        d.markQueued("http://forum.example.com/viewtopic.php?t=42");
+
+        assertTrue(d.isDuplicate("http://forum.example.com/viewtopic.php?t=42&sid=0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c"));
+        assertTrue(d.isDuplicate("http://forum.example.com/viewtopic.php?t=42&PHPSESSID=abc123"));
+        // A short sid is an identifier (a survey, a story), not a session token.
+        d.markQueued("http://example.com/survey.php?sid=123");
+        assertFalse(d.isDuplicate("http://example.com/survey.php?sid=456"));
+    }
+
+    @Test
+    public void testDirectionParametersAreNoiseOnlyForDirections() {
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        d.markQueued("http://example.com/files");
+        assertTrue(d.isDuplicate("http://example.com/files?dir=desc"));
+        // ?dir= can also name a folder, which is different content.
+        assertFalse(d.isDuplicate("http://example.com/files?dir=/reports/2024"));
+        d.markQueued("http://example.com/shop");
+        assertFalse("an order number is content", d.isDuplicate("http://example.com/shop?order=12345"));
+    }
+
+    // ── content parameters keep URLs apart ─────────────────────────────────────
 
     @Test
     public void testContentIdUrlsAreNotDeduped() {
@@ -31,7 +69,6 @@ public class UrlDeduplicatorTest {
         assertFalse(d.isDuplicate(first));
         d.markQueued(first);
 
-        // Different value for the same key → NOT a duplicate
         assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1002"));
         assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=1003"));
         assertFalse(d.isDuplicate("http://example.com/file.aspx?fileid=0"));
@@ -47,6 +84,18 @@ public class UrlDeduplicatorTest {
 
         assertFalse(d.isDuplicate("http://example.com/list.php?page=2"));
         assertFalse(d.isDuplicate("http://example.com/list.php?page=3"));
+    }
+
+    @Test
+    public void testNextPageOfAQueryIsNotDeduped() {
+        // An added parameter is not a harmless variant: page 2 of a search is new content,
+        // and so are later pages of a forum thread.
+        UrlDeduplicator d = new UrlDeduplicator(false);
+        d.markQueued("http://example.com/search?q=report");
+        assertFalse(d.isDuplicate("http://example.com/search?q=report&page=2"));
+
+        d.markQueued("http://forum.example.com/viewtopic.php?t=42");
+        assertFalse(d.isDuplicate("http://forum.example.com/viewtopic.php?t=42&start=20"));
     }
 
     // ── exact URL dedup ────────────────────────────────────────────────────────
@@ -83,14 +132,14 @@ public class UrlDeduplicatorTest {
     }
 
     @Test
-    public void testNoParamBaseAllowsParameterizedVariants() {
-        // Visiting the bare base path must NOT block parameterized variants  - 
-        // ?cat=docs and ?sort=asc could be entirely different content pages.
+    public void testBarePathAllowsContentVariantsButNotNoiseVariants() {
         UrlDeduplicator d = new UrlDeduplicator(false);
         d.markQueued("http://example.com/page");
-        assertFalse(d.isDuplicate("http://example.com/page?sort=asc"));
-        assertFalse(d.isDuplicate("http://example.com/page?sort=desc"));
+        // A content parameter selects something else...
+        assertFalse(d.isDuplicate("http://example.com/page?cat=docs"));
         assertFalse(d.isDuplicate("http://example.com/page?foo=bar"));
+        // ...a sort order does not.
+        assertTrue(d.isDuplicate("http://example.com/page?sort=asc"));
         // The exact bare URL itself is still a dup.
         assertTrue(d.isDuplicate("http://example.com/page"));
     }
@@ -114,17 +163,10 @@ public class UrlDeduplicatorTest {
         UrlDeduplicator d = new UrlDeduplicator(false);
         d.markQueued("http://example.com/page?a=1&b=2");
 
-        // Reverse order + extra param → still a dup (canonical {a=1,b=2} ⊆ {b=2,a=1,c=3})
-        assertTrue(d.isDuplicate("http://example.com/page?b=2&a=1&c=3"));
-    }
-
-    @Test
-    public void testParamOrderDoesNotPreventFirstVisit() {
-        // ?b=2&a=1 is the same canonical as ?a=1&b=2, subsequent visit with extra param is a dup
-        UrlDeduplicator d = new UrlDeduplicator(false);
-        d.markQueued("http://example.com/page?b=2&a=1");
-
-        assertTrue(d.isDuplicate("http://example.com/page?a=1&b=2&extra=x"));
+        assertTrue(d.isDuplicate("http://example.com/page?b=2&a=1"));
+        assertTrue(d.isDuplicate("http://example.com/page?b=2&utm_source=x&a=1"));
+        // An extra content parameter is a different page.
+        assertFalse(d.isDuplicate("http://example.com/page?b=2&a=1&c=3"));
     }
 
     // ── --all-urls mode ────────────────────────────────────────────────────────
@@ -136,7 +178,7 @@ public class UrlDeduplicatorTest {
         d.markQueued("http://example.com/page?id=12345");
 
         assertFalse(d.isDuplicate("http://example.com/page?id=12345&sort=name"));
-        assertFalse(d.isDuplicate("http://example.com/page?id=12345&sort=date"));
+        assertFalse(d.isDuplicate("http://example.com/page?id=12345&utm_source=x"));
     }
 
     @Test
@@ -161,8 +203,7 @@ public class UrlDeduplicatorTest {
         d.markQueued("http://example.com/b");
         assertEquals(2, d.size());
 
-        // Marking a dup (same URL) shouldn't increase size - but isDuplicate should have returned true;
-        // markQueued of the same URL does add it to queued (no-op since it's a Set), so size stays 2
+        // Marking the same URL again is a no-op, so the size stays 2.
         d.markQueued("http://example.com/a");
         assertEquals(2, d.size());
     }
@@ -171,22 +212,22 @@ public class UrlDeduplicatorTest {
 
     @Test
     public void testEmptyQueryString() {
-        // URL ending in ? with no actual params - treated as having canonical {""};
-        // the exact URL is still tracked and deduped on re-encounter
+        // URL ending in ? with no actual params is the same page as without the ?
         UrlDeduplicator d = new UrlDeduplicator(false);
         String url = "http://example.com/page?";
         assertFalse(d.isDuplicate(url));
         d.markQueued(url);
         assertTrue(d.isDuplicate(url));
+        assertTrue(d.isDuplicate("http://example.com/page"));
     }
 
     @Test
     public void testSingleParamNoValue() {
-        // ?flag (no =) is treated as a token "flag"
+        // ?flag (no =) is a parameter like any other
         UrlDeduplicator d = new UrlDeduplicator(false);
         d.markQueued("http://example.com/page?flag");
-        // Same param → dup
-        assertTrue(d.isDuplicate("http://example.com/page?flag&extra=1"));
+        assertTrue(d.isDuplicate("http://example.com/page?flag&utm_source=x"));
+        assertFalse(d.isDuplicate("http://example.com/page?flag&extra=1"));
     }
 
     @Test
@@ -218,7 +259,6 @@ public class UrlDeduplicatorTest {
         // Realistic mix: some are sort variants, some are genuinely different content
         UrlDeduplicator d = new UrlDeduplicator(false);
 
-        // First visit: main page with primary ID
         String seed = "http://court.cz/subject.aspx?id=100";
         assertFalse(d.isDuplicate(seed));
         d.markQueued(seed);
@@ -231,10 +271,9 @@ public class UrlDeduplicatorTest {
         assertFalse(d.isDuplicate("http://court.cz/subject.aspx?id=200"));
         d.markQueued("http://court.cz/subject.aspx?id=200");
 
-        // Sort variant of the second subject: canonical is still {id=100} from the first visit.
-        // ?id=200&sort=date does NOT contain id=100, so it is NOT recognized as a dup.
-        // This is a known limitation: per-base canonicals come from the first-seen URL only.
-        assertFalse(d.isDuplicate("http://court.cz/subject.aspx?id=200&sort=date"));
+        // The sort variant of the second subject is recognised too: every queued URL counts,
+        // not only the first one seen for the path.
+        assertTrue(d.isDuplicate("http://court.cz/subject.aspx?id=200&sort=date"));
 
         // Document files with different IDs → not dups
         String doc1 = "http://court.cz/file.aspx?fileid=9477999";
@@ -269,15 +308,15 @@ public class UrlDeduplicatorTest {
 
     @Test
     public void testSchemeDeduplicationWithQueryParams() {
-        // Sort-variant dedup should also work across http/https
+        // Noise variants are recognised across http/https too
         UrlDeduplicator d = new UrlDeduplicator(false);
         d.markQueued("https://example.com/list?sort=asc");
 
-        // Same path + superset params via http → still a dup
-        assertTrue(d.isDuplicate("http://example.com/list?sort=asc&page=2"));
+        assertTrue(d.isDuplicate("http://example.com/list?sort=desc"));
+        assertFalse("page 2 is new content", d.isDuplicate("http://example.com/list?sort=asc&page=2"));
     }
 
-    // ── bare path after parameterised variant (M-3) ───────────────────────────
+    // ── bare path after parameterised variant ─────────────────────────────────
 
     @Test
     public void testBarePathNotBlockedByParameterisedVariant() {
@@ -287,7 +326,6 @@ public class UrlDeduplicatorTest {
         assertFalse(d.isDuplicate("http://example.com/article?id=5"));
         d.markQueued("http://example.com/article?id=5");
 
-        // Bare path must NOT be treated as a duplicate.
         assertFalse("bare path must not be blocked by a queued parameterised variant",
                 d.isDuplicate("http://example.com/article"));
     }
