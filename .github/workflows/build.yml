@@ -20,3 +20,20 @@ jobs:
           cache: maven
       - name: Build and test
         run: mvn -B -ntp verify
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t webgrep .
+      - name: Smoke test
+        run: |
+          docker run --rm webgrep --help | grep -q "Usage:"
+          # The image must not run as root.
+          test "$(docker run --rm --entrypoint id webgrep -un)" = webgrep
+          # A mounted, read-only folder can be searched.
+          mkdir -p "$RUNNER_TEMP/docs"
+          printf 'nothing here\nthe quick brown fox\n' > "$RUNNER_TEMP/docs/a.txt"
+          docker run --rm -v "$RUNNER_TEMP/docs:/data:ro" webgrep -F /data -k fox | tee "$RUNNER_TEMP/out.txt"
+          grep -q "Total matches found: 1" "$RUNNER_TEMP/out.txt"
